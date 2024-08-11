@@ -21,6 +21,14 @@ where
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    let builtin_commands: Vec<Box<dyn builtin::BuiltinCommand>> = vec![
+        Box::new(builtin::echo::Echo {}),
+        Box::new(builtin::exit::Exit {}),
+        Box::new(builtin::type_::Type {
+            builtin_commands: vec!["echo", "exit", "type"].into_iter().map(|c| c.to_string()).collect()
+        })
+    ];
+
     loop {
         let stdin = io::stdin();
         let mut input = String::new();
@@ -30,10 +38,11 @@ fn main() -> Result<(), anyhow::Error> {
         let command_and_args: Vec<&str> = input.splitn(2, " ").collect();
         if command_and_args.len() > 0 {
             let command = command_and_args[0].to_string();
-            if command == "exit" {
-                execute(builtin::exit::command,&command_and_args);
-            } else if command == "echo" {
-                execute(builtin::echo::command, &command_and_args);
+            let found_builtin_command = builtin_commands.iter().find(|c| {
+                c.name() == command
+            });
+            if let Some(builtin_command) = found_builtin_command {
+                execute(|command_and_args| builtin_command.command(command_and_args), &command_and_args);
             } else {
                 println!("{}: command not found", command.trim());
             }
