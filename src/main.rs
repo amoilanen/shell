@@ -1,8 +1,10 @@
 use std::io::{self, Write};
+use std::env;
 use std::panic;
 use std::fmt::Debug;
 
 mod builtin;
+mod path;
 
 fn execute<F, R>(f: F, command_and_args: &Vec<&str>) -> ()
 where
@@ -21,10 +23,13 @@ where
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    let path = path::Path::parse(&env::var("PATH")?)?;
+    //println!("path: {:?}", path);
     let builtin_commands: Vec<Box<dyn builtin::BuiltinCommand>> = vec![
         Box::new(builtin::echo::Echo {}),
         Box::new(builtin::exit::Exit {}),
         Box::new(builtin::type_::Type {
+            path: path.clone(),
             builtin_commands: vec!["echo", "exit", "type"].into_iter().map(|c| c.to_string()).collect()
         })
     ];
@@ -37,9 +42,9 @@ fn main() -> Result<(), anyhow::Error> {
         stdin.read_line(&mut input)?;
         let command_and_args: Vec<&str> = input.splitn(2, " ").collect();
         if command_and_args.len() > 0 {
-            let command = command_and_args[0].to_string();
+            let command: &str = command_and_args[0].trim();
             let found_builtin_command = builtin_commands.iter().find(|c| {
-                c.name() == command
+                c.name() == command.to_string()
             });
             if let Some(builtin_command) = found_builtin_command {
                 execute(|command_and_args| builtin_command.command(command_and_args), &command_and_args);

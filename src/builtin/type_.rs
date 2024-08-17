@@ -1,6 +1,8 @@
 use super::BuiltinCommand;
+use crate::path;
 
 pub(crate) struct Type {
+    pub(crate) path: path::Path,
     pub(crate) builtin_commands: Vec<String>
 }
 impl BuiltinCommand for Type {
@@ -13,7 +15,11 @@ impl BuiltinCommand for Type {
             if is_shell_builtin {
                 println!("{} is a shell builtin", command_name.trim());
             } else {
-                println!("{}: not found", command_name.trim());
+                if let Some(found_executable) = self.path.find_command(command_name.trim()) {
+                    println!("{} is {}", command_name.trim(), found_executable);
+                } else {
+                    println!("{}: not found", command_name.trim());
+                }
             }
         }
     }
