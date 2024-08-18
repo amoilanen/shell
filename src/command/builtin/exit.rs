@@ -1,9 +1,10 @@
+use crate::command::ShellCommand;
 use std::process;
-use super::BuiltinCommand;
 
 pub(crate) struct Exit {}
-impl BuiltinCommand for Exit {
-    fn command(&self, command_and_args: &Vec<&str>) -> () {
+
+impl ShellCommand for Exit {
+    fn run(&self, command_and_args: &Vec<&str>) -> () {
         let mut exit_code = 0;
         if let Some(args_input) =  command_and_args.get(1) {
             let args: Vec<&str> = args_input.split_whitespace().collect();

@@ -1,12 +1,13 @@
-use super::BuiltinCommand;
+use crate::command::ShellCommand;
 use crate::path;
 
 pub(crate) struct Type {
     pub(crate) path: path::Path,
     pub(crate) builtin_commands: Vec<String>
 }
-impl BuiltinCommand for Type {
-    fn command(&self, command_and_args: &Vec<&str>) -> () {
+
+impl ShellCommand for Type {
+    fn run(&self, command_and_args: &Vec<&str>) -> () {
         let mut is_shell_builtin = false;
         if let Some(command_name) =  command_and_args.get(1) {
             if self.builtin_commands.iter().find(|c| c.to_string() == command_name.trim().to_string()).is_some() {

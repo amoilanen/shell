@@ -2,10 +2,11 @@ use std::io::{self, Write};
 use std::env;
 use std::panic;
 use std::fmt::Debug;
-use std::process::Command;
+use crate::command::builtin;
+use crate::command::ShellCommand;
 
-mod builtin;
 mod path;
+mod command;
 
 fn execute<F, R>(f: F, command_and_args: &Vec<&str>) -> ()
 where
@@ -26,7 +27,7 @@ where
 fn main() -> Result<(), anyhow::Error> {
     let path = path::Path::parse(&env::var("PATH")?)?;
     //println!("path: {:?}", path);
-    let builtin_commands: Vec<Box<dyn builtin::BuiltinCommand>> = vec![
+    let builtin_commands: Vec<Box<dyn ShellCommand>> = vec![
         Box::new(builtin::echo::Echo {}),
         Box::new(builtin::exit::Exit {}),
         Box::new(builtin::type_::Type {
@@ -48,16 +49,12 @@ fn main() -> Result<(), anyhow::Error> {
                 c.name() == command.to_string()
             });
             if let Some(builtin_command) = found_builtin_command {
-                execute(|command_and_args| builtin_command.command(command_and_args), &command_and_args);
+                execute(|command_and_args| builtin_command.run(command_and_args), &command_and_args);
             } else if let Some(found_executable) = path.find_command(command) {
-                let args: Vec<&str> = command_and_args[1..].to_vec().iter().map(|arg| arg.trim()).collect();
-                //TODO: Wrap into "execute"
-                let output = Command::new(found_executable).args(&args).output().expect("failed to execute process");
-                if output.status.success() {
-                    print!("{}", String::from_utf8_lossy(&output.stdout));
-                } else {
-                    print!("{}", String::from_utf8_lossy(&output.stderr));
-                }
+                let command = command::exec::Exec {
+                    found_executable
+                };
+                execute(|command_and_args| command.run(command_and_args), &command_and_args);
             } else {
                 println!("{}: command not found", command.trim());
             }

@@ -1,8 +1,9 @@
-use super::BuiltinCommand;
+use crate::command::ShellCommand;
 
 pub(crate) struct Echo {}
-impl BuiltinCommand for Echo {
-    fn command(&self, command_and_args: &Vec<&str>) -> () {
+
+impl ShellCommand for Echo {
+    fn run(&self, command_and_args: &Vec<&str>) -> () {
         if let Some(args_input) = command_and_args.get(1) {
             print!("{}", args_input);
         }
