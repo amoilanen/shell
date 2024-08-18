@@ -50,15 +50,13 @@ fn main() -> Result<(), anyhow::Error> {
             if let Some(builtin_command) = found_builtin_command {
                 execute(|command_and_args| builtin_command.command(command_and_args), &command_and_args);
             } else if let Some(found_executable) = path.find_command(command) {
-                let args = command_and_args[1..].to_vec();
-                match Command::new(found_executable).args(&args).output() {
-                    Ok(output) =>  {
-                        print!("{}", String::from_utf8_lossy(&output.stdout));
-                        print!("{}", String::from_utf8_lossy(&output.stderr));
-                        ()
-                    },
-                    Err(error) =>
-                        println!("{:?}", error)
+                let args: Vec<&str> = command_and_args[1..].to_vec().iter().map(|arg| arg.trim()).collect();
+                //TODO: Wrap into "execute"
+                let output = Command::new(found_executable).args(&args).output().expect("failed to execute process");
+                if output.status.success() {
+                    print!("{}", String::from_utf8_lossy(&output.stdout));
+                } else {
+                    print!("{}", String::from_utf8_lossy(&output.stderr));
                 }
             } else {
                 println!("{}: command not found", command.trim());
