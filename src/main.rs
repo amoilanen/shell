@@ -33,7 +33,7 @@ fn main() -> Result<(), anyhow::Error> {
         Box::new(builtin::pwd::Pwd {}),
         Box::new(builtin::type_::Type {
             path: path.clone(),
-            builtin_commands: vec!["echo", "exit", "type"].into_iter().map(|c| c.to_string()).collect()
+            builtin_commands: vec!["echo", "pwd", "exit", "type"].into_iter().map(|c| c.to_string()).collect()
         })
     ];
 

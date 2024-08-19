@@ -4,7 +4,7 @@ use std::env;
 pub(crate) struct Pwd {}
 
 impl ShellCommand for Pwd {
-    fn run(&self, command_and_args: &Vec<&str>) -> () {
+    fn run(&self, _: &Vec<&str>) -> () {
         let current_directory = env::current_dir().unwrap();
         println!("{}", current_directory.to_str().unwrap());
     }
