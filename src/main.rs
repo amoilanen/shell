@@ -30,6 +30,7 @@ fn main() -> Result<(), anyhow::Error> {
     let builtin_commands: Vec<Box<dyn ShellCommand>> = vec![
         Box::new(builtin::echo::Echo {}),
         Box::new(builtin::exit::Exit {}),
+        Box::new(builtin::pwd::Pwd {}),
         Box::new(builtin::type_::Type {
             path: path.clone(),
             builtin_commands: vec!["echo", "exit", "type"].into_iter().map(|c| c.to_string()).collect()
