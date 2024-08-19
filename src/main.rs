@@ -26,14 +26,14 @@ where
 
 fn main() -> Result<(), anyhow::Error> {
     let path = path::Path::parse(&env::var("PATH")?)?;
-    //println!("path: {:?}", path);
     let builtin_commands: Vec<Box<dyn ShellCommand>> = vec![
         Box::new(builtin::echo::Echo {}),
         Box::new(builtin::exit::Exit {}),
         Box::new(builtin::pwd::Pwd {}),
+        Box::new(builtin::cd::Cd {}),
         Box::new(builtin::type_::Type {
             path: path.clone(),
-            builtin_commands: vec!["echo", "pwd", "exit", "type"].into_iter().map(|c| c.to_string()).collect()
+            builtin_commands: vec!["echo", "cd", "pwd", "exit", "type"].into_iter().map(|c| c.to_string()).collect()
         })
     ];
 
