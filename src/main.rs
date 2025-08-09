@@ -1,16 +1,16 @@
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::env;
 use std::panic;
 use std::fmt::Debug;
-use crate::command::builtin;
 use crate::command::ShellCommand;
 
 mod path;
 mod command;
 
-fn execute<F, R>(f: F, command_and_args: &Vec<&str>) -> ()
+fn execute<F, R>(f: F, command_and_args: &[&str]) -> ()
 where
-  F: Fn(&Vec<&str>) -> R,
+  F: Fn(&[&str]) -> R,
   R: Debug
 {
     match panic::catch_unwind(panic::AssertUnwindSafe(|| {
@@ -26,16 +26,16 @@ where
 
 fn main() -> Result<(), anyhow::Error> {
     let path = path::Path::parse(&env::var("PATH")?)?;
-    let builtin_commands: Vec<Box<dyn ShellCommand>> = vec![
-        Box::new(builtin::echo::Echo {}),
-        Box::new(builtin::exit::Exit {}),
-        Box::new(builtin::pwd::Pwd {}),
-        Box::new(builtin::cd::Cd {}),
-        Box::new(builtin::type_::Type {
+    let builtin_commands: HashMap<&str, ShellCommand> = [
+        ("echo", command::ShellCommand::Echo {}),
+        ("cd", command::ShellCommand::Cd {}),
+        ("pwd", command::ShellCommand::Pwd {}),
+        ("exit", command::ShellCommand::Exit {}),
+        ("type", command::ShellCommand::Type {
             path: path.clone(),
             builtin_commands: vec!["echo", "cd", "pwd", "exit", "type"].into_iter().map(|c| c.to_string()).collect()
         })
-    ];
+    ].into_iter().collect();
 
     loop {
         let stdin = io::stdin();
@@ -46,14 +46,11 @@ fn main() -> Result<(), anyhow::Error> {
         let command_and_args: Vec<&str> = input.splitn(2, " ").collect();
         if command_and_args.len() > 0 {
             let command: &str = command_and_args[0].trim();
-            let found_builtin_command = builtin_commands.iter().find(|c| {
-                c.name() == command.to_string()
-            });
-            if let Some(builtin_command) = found_builtin_command {
+            if let Some(builtin_command) = builtin_commands.get(command) {
                 execute(|command_and_args| builtin_command.run(command_and_args), &command_and_args);
             } else if let Some(found_executable) = path.find_command(command) {
-                let command = command::exec::Exec {
-                    found_executable
+                let command = command::ShellCommand::Exec {
+                    executable: found_executable
                 };
                 execute(|command_and_args| command.run(command_and_args), &command_and_args);
             } else {
