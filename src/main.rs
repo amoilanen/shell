@@ -43,7 +43,7 @@ fn main() -> Result<(), anyhow::Error> {
         print!("$ ");
         io::stdout().flush()?;
         stdin.read_line(&mut input)?;
-        let command_and_args: Vec<&str> = input.splitn(2, " ").collect();
+        let command_and_args: Vec<&str> = input.split(" ").collect();
         if command_and_args.len() > 0 {
             let command: &str = command_and_args[0].trim();
             if let Some(builtin_command) = builtin_commands.get(command) {
