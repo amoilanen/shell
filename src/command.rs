@@ -51,8 +51,6 @@ impl CommandWithArgs {
                 if inside_single_quotes {
                     if ch == '\'' {
                         inside_single_quotes = false;
-                        arguments.push(current_arg.clone());
-                        current_arg = String::new();
                     } else {
                         current_arg.push(ch);
                     }
@@ -160,7 +158,7 @@ mod tests {
     #[test]
     fn test_parse_empty_quoted_string() -> Result<(), anyhow::Error> {
         let result = CommandWithArgs::parse_command("echo ''")?;
-        assert_eq!(result, Some(cmd("echo", vec![""])));
+        assert_eq!(result, Some(cmd("echo", vec![])));
         Ok(())
     }
 
@@ -182,6 +180,13 @@ mod tests {
     fn test_parse_complex_command_line() -> Result<(), anyhow::Error> {
         let result = CommandWithArgs::parse_command("rsync -av 'source dir/' '/dest/path with spaces/' --exclude='*.tmp'")?;
         assert_eq!(result, Some(cmd("rsync", vec!["-av", "source dir/", "/dest/path with spaces/", "--exclude=*.tmp"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_quotes_next_to_each_other() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo 'example     shell' 'hello''test' script''world")?;
+        assert_eq!(result, Some(cmd("echo", vec!["example     shell", "hellotest", "scriptworld"])));
         Ok(())
     }
 
