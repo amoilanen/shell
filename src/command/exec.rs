@@ -1,9 +1,7 @@
 use std::process::Command;
 use std::path::Path;
 
-pub(crate) fn run(command_and_args: &[&str], executable: &str) -> () {
-    let args: Vec<&str> = command_and_args[1..].to_vec().iter().map(|arg| arg.trim()).collect();
-
+pub(crate) fn run(args: &[&str], executable: &str) -> () {
     let path = Path::new(executable);
     let executable_name = path.file_name()
         .and_then(|name| name.to_str())
@@ -13,7 +11,7 @@ pub(crate) fn run(command_and_args: &[&str], executable: &str) -> () {
         .unwrap_or(".");
 
     let mut command = Command::new(executable_name);
-    command.args(&args);
+    command.args(args);
 
     if executable_dir != "." {
         command.current_dir(executable_dir);

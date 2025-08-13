@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use std::env;
 use std::panic;
 use std::fmt::Debug;
-use crate::command::ShellCommand;
+use crate::command::{CommandWithArgs, ShellCommand};
 
 mod path;
 mod command;
@@ -43,16 +43,17 @@ fn main() -> Result<(), anyhow::Error> {
         print!("$ ");
         io::stdout().flush()?;
         stdin.read_line(&mut input)?;
-        let command_and_args: Vec<&str> = input.split(" ").collect();
-        if command_and_args.len() > 0 {
-            let command: &str = command_and_args[0].trim();
-            if let Some(builtin_command) = builtin_commands.get(command) {
-                execute(|command_and_args| builtin_command.run(command_and_args), &command_and_args);
-            } else if let Some(found_executable) = path.find_command(command) {
+        let command_and_args = CommandWithArgs::parse_command(&input)?;
+        if let Some(command_with_args) = command_and_args {
+            let command = &command_with_args.command;
+            let args = &command_with_args.get_args();
+            if let Some(builtin_command) = builtin_commands.get(command.as_str()) {
+                execute(|command_and_args| builtin_command.run(command_and_args), &args);
+            } else if let Some(found_executable) = path.find_command(command.as_str()) {
                 let command = command::ShellCommand::Exec {
                     executable: found_executable
                 };
-                execute(|command_and_args| command.run(command_and_args), &command_and_args);
+                execute(|command_and_args| command.run(command_and_args), &args);
             } else {
                 println!("{}: command not found", command.trim());
             }
