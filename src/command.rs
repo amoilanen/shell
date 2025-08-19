@@ -46,6 +46,7 @@ impl CommandWithArgs {
             let all_args = command_and_args.get(1).ok_or(anyhow::anyhow!("No arguments provided"))?.to_string();
             let mut arguments = Vec::new();
             let mut inside_single_quotes = false;
+            let mut inside_double_quotes = false;
             let mut current_arg = String::new();
             for ch in all_args.chars() {
                 if inside_single_quotes {
@@ -54,9 +55,17 @@ impl CommandWithArgs {
                     } else {
                         current_arg.push(ch);
                     }
+                } else if inside_double_quotes {
+                    if ch == '"' {
+                        inside_double_quotes = false;
+                    } else {
+                        current_arg.push(ch);
+                    }
                 } else {
                     if ch == '\'' {
                         inside_single_quotes = true;
+                    } else if ch == '"' {
+                        inside_double_quotes = true;
                     } else if ch == ' ' {
                         if current_arg.len() > 0 {
                             arguments.push(current_arg.clone());
@@ -195,5 +204,47 @@ mod tests {
         let command = cmd("test", vec!["arg1", "arg2"]);
         let args = command.get_args();
         assert_eq!(args, vec!["arg1", "arg2"]);
+    }
+
+    #[test]
+    fn test_parse_echo_with_double_quoted_strings() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \"quz  hello\"  \"bar\"")?;
+        assert_eq!(result, Some(cmd("echo", vec!["quz  hello", "bar"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_echo_with_double_quoted_strings_containing_single_quotes() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \"bar\"  \"shell's\"  \"foo\"")?;
+        assert_eq!(result, Some(cmd("echo", vec!["bar", "shell's", "foo"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_cat_with_double_quoted_file_paths() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("cat \"/tmp/file name\" \"/tmp/'file name' with spaces\"")?;
+        assert_eq!(result, Some(cmd("cat", vec!["/tmp/file name", "/tmp/'file name' with spaces"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_empty_double_quoted_string() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \"\"")?;
+        assert_eq!(result, Some(cmd("echo", vec![])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_mixed_single_and_double_quotes() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo 'single quoted' \"double quoted\"")?;
+        assert_eq!(result, Some(cmd("echo", vec!["single quoted", "double quoted"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_double_quotes_next_to_each_other() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \"hello\"\"world\" \"test\"")?;
+        assert_eq!(result, Some(cmd("echo", vec!["helloworld", "test"])));
+        Ok(())
     }
 }
