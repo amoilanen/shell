@@ -50,12 +50,7 @@ impl CommandWithArgs {
             let mut current_arg = String::new();
             let mut is_escaped_character = false;
             for ch in all_args.chars() {
-                if is_escaped_character {
-                    is_escaped_character = false;
-                    current_arg.push(ch);
-                } else if ch == '\\' {
-                    is_escaped_character = true;
-                } else if inside_single_quotes {
+                if inside_single_quotes {
                     if ch == '\'' {
                         inside_single_quotes = false;
                     } else {
@@ -68,7 +63,12 @@ impl CommandWithArgs {
                         current_arg.push(ch);
                     }
                 } else {
-                    if ch == '\'' {
+                    if is_escaped_character {
+                        is_escaped_character = false;
+                        current_arg.push(ch)
+                    } else if ch == '\\' {
+                        is_escaped_character = true;
+                    } else if ch == '\'' {
                         inside_single_quotes = true;
                     } else if ch == '"' {
                         inside_double_quotes = true;
@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn test_parse_backslash_before_blank_inside_double_quotes() -> Result<(), anyhow::Error> {
         let result = CommandWithArgs::parse_command("echo \"before\\   after\"")?;
-        assert_eq!(result, Some(cmd("echo", vec!["before   after"])));
+        assert_eq!(result, Some(cmd("echo", vec!["before\\   after"])));
         Ok(())
     }
 
@@ -271,7 +271,35 @@ mod tests {
     #[test]
     fn test_parse_multiple_backslashes_inside_double_quotes() -> Result<(), anyhow::Error> {
         let result = CommandWithArgs::parse_command("cat \"/tmp/file\\\\name\" \"/tmp/file\\ name\"")?;
-        assert_eq!(result, Some(cmd("cat", vec!["/tmp/file\\name", "/tmp/file name"])));
+        assert_eq!(result, Some(cmd("cat", vec!["/tmp/file\\\\name", "/tmp/file\\ name"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_escape_sequences_in_double_quotes() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("cat \"/tmp/quz/f\\n36\" \"/tmp/quz/f\\t12\" \"/tmp/quz/f\\'52\"")?;
+        assert_eq!(result, Some(cmd("cat", vec!["/tmp/quz/f\\n36", "/tmp/quz/f\\t12", "/tmp/quz/f\\'52"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_escape_sequences_outside_quotes() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo world\\nshell")?;
+        assert_eq!(result, Some(cmd("echo", vec!["worldnshell"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_simple_escaped_quote() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \\'hello\\'") ?;
+        assert_eq!(result, Some(cmd("echo", vec!["'hello'"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_escaped_quotes_with_space() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \\'\\\"script shell\\\"\\'") ?;
+        assert_eq!(result, Some(cmd("echo", vec!["'\"script", "shell\"'"])));
         Ok(())
     }
 }
