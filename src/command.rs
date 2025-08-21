@@ -48,8 +48,14 @@ impl CommandWithArgs {
             let mut inside_single_quotes = false;
             let mut inside_double_quotes = false;
             let mut current_arg = String::new();
+            let mut is_escaped_character = false;
             for ch in all_args.chars() {
-                if inside_single_quotes {
+                if is_escaped_character {
+                    is_escaped_character = false;
+                    current_arg.push(ch);
+                } else if ch == '\\' {
+                    is_escaped_character = true;
+                } else if inside_single_quotes {
                     if ch == '\'' {
                         inside_single_quotes = false;
                     } else {
@@ -245,6 +251,27 @@ mod tests {
     fn test_parse_double_quotes_next_to_each_other() -> Result<(), anyhow::Error> {
         let result = CommandWithArgs::parse_command("echo \"hello\"\"world\" \"test\"")?;
         assert_eq!(result, Some(cmd("echo", vec!["helloworld", "test"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_backslash_before_blank_inside_double_quotes() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \"before\\   after\"")?;
+        assert_eq!(result, Some(cmd("echo", vec!["before   after"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_multiple_backslashes_before_blanks() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo world\\ \\ \\ \\ \\ \\ script")?;
+        assert_eq!(result, Some(cmd("echo", vec!["world      script"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_multiple_backslashes_inside_double_quotes() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("cat \"/tmp/file\\\\name\" \"/tmp/file\\ name\"")?;
+        assert_eq!(result, Some(cmd("cat", vec!["/tmp/file\\name", "/tmp/file name"])));
         Ok(())
     }
 }
