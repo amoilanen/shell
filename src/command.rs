@@ -57,8 +57,21 @@ impl CommandWithArgs {
                         current_arg.push(ch);
                     }
                 } else if inside_double_quotes {
-                    if ch == '"' {
+                    if is_escaped_character {
+                        if ch == '\"' || ch == '\\' || ch == '$' || ch == '`' {
+                            current_arg.push(ch);
+                        } else if ch == 'n' {
+                            current_arg.push('\n');
+                        } else {
+                            // If it's not a recognized escape sequence, treat the backslash as literal
+                            current_arg.push('\\');
+                            current_arg.push(ch);
+                        }
+                        is_escaped_character = false;
+                    } else if ch == '"' {
                         inside_double_quotes = false;
+                    } else if ch == '\\' {
+                        is_escaped_character = true;
                     } else {
                         current_arg.push(ch);
                     }
@@ -271,14 +284,14 @@ mod tests {
     #[test]
     fn test_parse_multiple_backslashes_inside_double_quotes() -> Result<(), anyhow::Error> {
         let result = CommandWithArgs::parse_command("cat \"/tmp/file\\\\name\" \"/tmp/file\\ name\"")?;
-        assert_eq!(result, Some(cmd("cat", vec!["/tmp/file\\\\name", "/tmp/file\\ name"])));
+        assert_eq!(result, Some(cmd("cat", vec!["/tmp/file\\name", "/tmp/file\\ name"])));
         Ok(())
     }
 
     #[test]
     fn test_parse_escape_sequences_in_double_quotes() -> Result<(), anyhow::Error> {
         let result = CommandWithArgs::parse_command("cat \"/tmp/quz/f\\n36\" \"/tmp/quz/f\\t12\" \"/tmp/quz/f\\'52\"")?;
-        assert_eq!(result, Some(cmd("cat", vec!["/tmp/quz/f\\n36", "/tmp/quz/f\\t12", "/tmp/quz/f\\'52"])));
+        assert_eq!(result, Some(cmd("cat", vec!["/tmp/quz/f\n36", "/tmp/quz/f\\t12", "/tmp/quz/f\\'52"])));
         Ok(())
     }
 
@@ -300,6 +313,55 @@ mod tests {
     fn test_parse_escaped_quotes_with_space() -> Result<(), anyhow::Error> {
         let result = CommandWithArgs::parse_command("echo \\'\\\"script shell\\\"\\'") ?;
         assert_eq!(result, Some(cmd("echo", vec!["'\"script", "shell\"'"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_escaped_double_quote_inside_double_quotes() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \"hello\\\"world\"")?;
+        assert_eq!(result, Some(cmd("echo", vec!["hello\"world"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_escaped_backslash_inside_double_quotes() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \"hello\\\\world\"")?;
+        assert_eq!(result, Some(cmd("echo", vec!["hello\\world"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_escaped_dollar_sign_inside_double_quotes() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \"hello\\$world\"")?;
+        assert_eq!(result, Some(cmd("echo", vec!["hello$world"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_escaped_backtick_inside_double_quotes() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \"hello\\`world\"")?;
+        assert_eq!(result, Some(cmd("echo", vec!["hello`world"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_escaped_newline_inside_double_quotes() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \"hello\\nworld\"")?;
+        assert_eq!(result, Some(cmd("echo", vec!["hello\nworld"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_multiple_escaped_characters_inside_double_quotes() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \"\\\"hello\\\" \\$world \\`test\\` \\\\backslash\"")?;
+        assert_eq!(result, Some(cmd("echo", vec!["\"hello\" $world `test` \\backslash"])));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_escaped_characters_at_beginning_and_end() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("echo \"\\\"start\\\" and \\\"end\\\"\"")?;
+        assert_eq!(result, Some(cmd("echo", vec!["\"start\" and \"end\""])));
         Ok(())
     }
 }
