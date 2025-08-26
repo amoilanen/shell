@@ -34,74 +34,79 @@ pub(crate) struct CommandWithArgs {
 }
 
 impl CommandWithArgs {
+
     pub(crate) fn parse_command(input: &str) -> Result<Option<CommandWithArgs>, anyhow::Error> {
         let input = input.trim();
         if input.is_empty() {
             return Ok(None);
         }
-        
-        let command_and_args: Vec<&str> = input.splitn(2," ").collect();
-        let command = command_and_args.get(0).ok_or(anyhow::anyhow!("No command provided"))?.to_string();
-        if command_and_args.len() >= 2 {
-            let all_args = command_and_args.get(1).ok_or(anyhow::anyhow!("No arguments provided"))?.to_string();
-            let mut arguments = Vec::new();
-            let mut inside_single_quotes = false;
-            let mut inside_double_quotes = false;
-            let mut current_arg = String::new();
-            let mut is_escaped_character = false;
-            for ch in all_args.chars() {
-                if inside_single_quotes {
-                    if ch == '\'' {
-                        inside_single_quotes = false;
+        let command_and_args = CommandWithArgs::read_quoted(input)?;
+        if command_and_args.len() == 0 {
+            return Err(anyhow::anyhow!("No command provided: {}", input));
+        }
+        if let Some(command) = command_and_args.get(0) {
+            Ok(Some(CommandWithArgs { command: command.clone(), args: command_and_args[1..].to_vec() }))
+        } else {
+            Err(anyhow::anyhow!("No command provided: {}", input))
+        }
+    }
+
+    fn read_quoted(input: &str) -> Result<Vec<String>, anyhow::Error> {
+        let mut result: Vec<String> = Vec::new();
+        let mut inside_single_quotes = false;
+        let mut inside_double_quotes = false;
+        let mut current_part = String::new();
+        let mut is_escaped_character = false;
+        for ch in input.chars() {
+            if inside_single_quotes {
+                if ch == '\'' {
+                    inside_single_quotes = false;
+                } else {
+                    current_part.push(ch);
+                }
+            } else if inside_double_quotes {
+                if is_escaped_character {
+                    if ch == '\"' || ch == '\\' || ch == '$' || ch == '`' {
+                        current_part.push(ch);
+                    } else if ch == 'n' {
+                        current_part.push('\n');
                     } else {
-                        current_arg.push(ch);
+                        // If it's not a recognized escape sequence, treat the backslash as literal
+                        current_part.push('\\');
+                        current_part.push(ch);
                     }
-                } else if inside_double_quotes {
-                    if is_escaped_character {
-                        if ch == '\"' || ch == '\\' || ch == '$' || ch == '`' {
-                            current_arg.push(ch);
-                        } else if ch == 'n' {
-                            current_arg.push('\n');
-                        } else {
-                            // If it's not a recognized escape sequence, treat the backslash as literal
-                            current_arg.push('\\');
-                            current_arg.push(ch);
-                        }
-                        is_escaped_character = false;
-                    } else if ch == '"' {
-                        inside_double_quotes = false;
-                    } else if ch == '\\' {
-                        is_escaped_character = true;
-                    } else {
-                        current_arg.push(ch);
+                    is_escaped_character = false;
+                } else if ch == '"' {
+                    inside_double_quotes = false;
+                } else if ch == '\\' {
+                    is_escaped_character = true;
+                } else {
+                    current_part.push(ch);
+                }
+            } else {
+                if is_escaped_character {
+                    is_escaped_character = false;
+                    current_part.push(ch)
+                } else if ch == '\\' {
+                    is_escaped_character = true;
+                } else if ch == '\'' {
+                    inside_single_quotes = true;
+                } else if ch == '"' {
+                    inside_double_quotes = true;
+                } else if ch == ' ' {
+                    if current_part.len() > 0 {
+                        result.push(current_part.clone());
+                        current_part = String::new();
                     }
                 } else {
-                    if is_escaped_character {
-                        is_escaped_character = false;
-                        current_arg.push(ch)
-                    } else if ch == '\\' {
-                        is_escaped_character = true;
-                    } else if ch == '\'' {
-                        inside_single_quotes = true;
-                    } else if ch == '"' {
-                        inside_double_quotes = true;
-                    } else if ch == ' ' {
-                        if current_arg.len() > 0 {
-                            arguments.push(current_arg.clone());
-                            current_arg = String::new();
-                        }
-                    } else {
-                        current_arg.push(ch);
-                    }
+                    current_part.push(ch);
                 }
             }
-            if current_arg.len() > 0 {
-                arguments.push(current_arg);
-            }
-            Ok(Some(CommandWithArgs { command, args: arguments }))
-        } else {
-            Ok(Some(CommandWithArgs { command, args: vec![] }))
         }
+        if current_part.len() > 0 {
+            result.push(current_part);
+        }
+        Ok(result)
     }
 
     pub(crate) fn get_args(&self) -> Vec<&str> {
@@ -124,6 +129,13 @@ mod tests {
     fn test_parse_empty_command() -> Result<(), anyhow::Error> {
         let result = CommandWithArgs::parse_command("")?;
         assert!(result.is_none(), "Empty command should return None");
+        Ok(())
+    }
+
+    #[test]
+    fn test_execute_quoted_command() -> Result<(), anyhow::Error> {
+        let result = CommandWithArgs::parse_command("'exe with \"quotes\"' file")?;
+        assert_eq!(result, Some(cmd("exe with \"quotes\"", vec!["file"])));
         Ok(())
     }
 
