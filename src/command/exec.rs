@@ -1,5 +1,7 @@
 use std::process::Command;
 use std::path::Path;
+use std::io::Write;
+use std::fs::OpenOptions;
 
 #[derive(Debug, PartialEq)]
 struct ExecutableInfo {
@@ -7,7 +9,7 @@ struct ExecutableInfo {
     pub directory: String,
 }
 
-pub(crate) fn run(args: &[&str], executable: &str) -> () {
+pub(crate) fn run(args: &[&str], executable: &str, stdout_redirect_filename: Option<&str>) -> () {
     let exec_info = parse_executable_path(executable);
     let mut command = build_command(&exec_info, args);
     
@@ -15,7 +17,18 @@ pub(crate) fn run(args: &[&str], executable: &str) -> () {
         .output()
         .expect(&format!("Failed to execute process {}", executable));
     if output.status.success() {
-        print!("{}", String::from_utf8_lossy(&output.stdout));
+        if let Some(stdout_redirect_filename) = stdout_redirect_filename {
+            //TODO: Instead of returning Unit, return a Result<(), anyhow::Error>
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(stdout_redirect_filename).unwrap();
+
+            file.write_all(&output.stdout).unwrap();
+        } else {
+            let to_output = String::from_utf8_lossy(&output.stdout).to_string();
+            print!("{}", to_output);
+        }
     } else {
         print!("{}", String::from_utf8_lossy(&output.stderr));
     }

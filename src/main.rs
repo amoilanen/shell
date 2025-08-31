@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use std::env;
 use std::panic;
 use std::fmt::Debug;
-use crate::command::{CommandWithArgs, ShellCommand};
+use crate::command::{ParsedCommand, ShellCommand};
 
 mod path;
 mod command;
@@ -43,17 +43,17 @@ fn main() -> Result<(), anyhow::Error> {
         print!("$ ");
         io::stdout().flush()?;
         stdin.read_line(&mut input)?;
-        let command_and_args = CommandWithArgs::parse_command(&input)?;
-        if let Some(command_with_args) = command_and_args {
-            let command = &command_with_args.command;
-            let args = &command_with_args.get_args();
+        let parsed_command = ParsedCommand::parse_command(&input)?;
+        if let Some(parsed_command) = parsed_command {
+            let command = &parsed_command.command;
+            let args = &parsed_command.get_args();
             if let Some(builtin_command) = builtin_commands.get(command.as_str()) {
-                execute(|command_and_args| builtin_command.run(command_and_args), &args);
+                execute(|command_and_args| builtin_command.run(command_and_args, parsed_command.stdout_redirect_filename.as_deref()), &args);
             } else if let Some(found_executable) = path.find_command(command.as_str()) {
                 let command = command::ShellCommand::Exec {
                     executable: found_executable
                 };
-                execute(|command_and_args| command.run(command_and_args), &args);
+                execute(|command_and_args| command.run(command_and_args, parsed_command.stdout_redirect_filename.as_deref()), &args);
             } else {
                 println!("{}: command not found", command.trim());
             }
