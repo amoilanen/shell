@@ -31,31 +31,36 @@ impl ShellCommand {
 pub(crate) struct ParsedCommand {
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
-    pub(crate) stdout_redirect_filename: Option<String>
+    pub(crate) stdout_redirect_filename: Option<String>,
+    pub(crate) stderr_redirect_filename: Option<String>
 }
 
 impl ParsedCommand {
 
+    //TODO: Support also 1>&2 2>&1
     fn parse_terms(input: &str, terms: &[String]) -> Result<Option<ParsedCommand>, anyhow::Error> {
         if terms.len() == 0 {
             return Err(anyhow::anyhow!("No command provided: {}", input));
         }
-        let mut found_stdout_redirect = false;
-        let mut args_end_index = terms.len();
+        let mut terms_without_redirect: Vec<String> = Vec::new();
         let mut idx = 0;
         let mut stdout_redirect_filename: Option<String> = None;
-        while !found_stdout_redirect && idx < terms.len() {
+        let mut stderr_redirect_filename: Option<String> = None;
+        while idx < terms.len() {
             if terms[idx].starts_with(">") || terms[idx].starts_with("1>") {
-                found_stdout_redirect = true;
-                args_end_index = idx;
                 stdout_redirect_filename = terms.get(idx + 1).map(|s| s.to_owned());
+                idx = idx + 2;
+            } else if terms[idx].starts_with("2>") {
+                stderr_redirect_filename = terms.get(idx + 1).map(|s| s.to_owned());
+                idx = idx + 2;
             } else {
-            idx += 1;
+                terms_without_redirect.push(terms[idx].clone());
+                idx = idx + 1;
             }
         }
-        if let Some(command) = terms.get(0) {
-            let args = terms[1..args_end_index].to_vec();
-            Ok(Some(ParsedCommand { command: command.clone(), args, stdout_redirect_filename }))
+        if let Some(command) = terms_without_redirect.get(0) {
+            let args = terms_without_redirect[1..].to_vec();
+            Ok(Some(ParsedCommand { command: command.clone(), args, stdout_redirect_filename, stderr_redirect_filename }))
         } else {
             Err(anyhow::anyhow!("No command provided: {}", input))
         }
@@ -144,7 +149,26 @@ mod tests {
         ParsedCommand {
             command: command.to_string(),
             args: args.into_iter().map(|s| s.to_string()).collect(),
-            stdout_redirect_filename: stdout_redirect_filename.map(|s| s.to_string())
+            stdout_redirect_filename: stdout_redirect_filename.map(|s| s.to_string()),
+            stderr_redirect_filename: None
+        }
+    }
+
+    fn cmd_with_stderr_redirect(command: &str, args: Vec<&str>, stderr_redirect_filename: Option<&str>) -> ParsedCommand {
+        ParsedCommand {
+            command: command.to_string(),
+            args: args.into_iter().map(|s| s.to_string()).collect(),
+            stdout_redirect_filename: None,
+            stderr_redirect_filename: stderr_redirect_filename.map(|s| s.to_string())
+        }
+    }
+
+    fn cmd_with_redirects(command: &str, args: Vec<&str>, stdout_redirect_filename: Option<&str>, stderr_redirect_filename: Option<&str>) -> ParsedCommand {
+        ParsedCommand {
+            command: command.to_string(),
+            args: args.into_iter().map(|s| s.to_string()).collect(),
+            stdout_redirect_filename: stdout_redirect_filename.map(|s| s.to_string()),
+            stderr_redirect_filename: stderr_redirect_filename.map(|s| s.to_string())
         }
     }
 
@@ -198,6 +222,20 @@ mod tests {
     fn test_parse_cat_with_stdout_wordier_redirect() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("cat /tmp/baz/blueberry nonexistent 1> /tmp/foo/quz.md")?;
         assert_eq!(result, Some(cmd_with_stdout_redirect("cat", vec!["/tmp/baz/blueberry", "nonexistent"], Some("/tmp/foo/quz.md"))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_ls_with_stderr_redirect() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("ls /tmp/baz 2> /tmp/foo/baz.md")?;
+        assert_eq!(result, Some(cmd_with_stderr_redirect("ls", vec!["/tmp/baz"], Some("/tmp/foo/baz.md"))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_ls_with_stdout_and_stderr_redirect() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("ls /tmp/baz 1> /tmp/foo/baz1.md 2> /tmp/foo/baz2.md")?;
+        assert_eq!(result, Some(cmd_with_redirects("ls", vec!["/tmp/baz"], Some("/tmp/foo/baz1.md"), Some("/tmp/foo/baz2.md"))));
         Ok(())
     }
 
