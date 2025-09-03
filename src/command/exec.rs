@@ -2,6 +2,7 @@ use std::process::Command;
 use std::path::Path;
 use std::io::Write;
 use std::fs::OpenOptions;
+use std::env;
 
 #[derive(Debug, PartialEq)]
 struct ExecutableInfo {
@@ -16,20 +17,20 @@ pub(crate) fn run(args: &[&str], executable: &str, stdout_redirect_filename: Opt
     let output = command
         .output()
         .expect(&format!("Failed to execute process {}", executable));
-    if output.status.success() {
-        if let Some(stdout_redirect_filename) = stdout_redirect_filename {
-            //TODO: Instead of returning Unit, return a Result<(), anyhow::Error>
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(stdout_redirect_filename).unwrap();
+    
+    if let Some(stdout_redirect_filename) = stdout_redirect_filename {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(stdout_redirect_filename).unwrap();
 
-            file.write_all(&output.stdout).unwrap();
-        } else {
-            let to_output = String::from_utf8_lossy(&output.stdout).to_string();
-            print!("{}", to_output);
-        }
+        file.write_all(&output.stdout).unwrap();
     } else {
+        let to_output = String::from_utf8_lossy(&output.stdout).to_string();
+        print!("{}", to_output);
+    }
+    if !output.stderr.is_empty() {
         print!("{}", String::from_utf8_lossy(&output.stderr));
     }
 }
@@ -40,14 +41,7 @@ fn parse_executable_path(executable: &str) -> ExecutableInfo {
         .and_then(|name| name.to_str())
         .unwrap_or(executable)
         .to_string();
-    
-    let executable_dir = match path.parent() {
-        Some(parent) if parent != Path::new("") => {
-            parent.to_str().unwrap_or(".").to_string()
-        }
-        _ => ".".to_string(),
-    };
-
+    let executable_dir = ".".to_string();
     ExecutableInfo {
         name: executable_name,
         directory: executable_dir,
@@ -57,11 +51,7 @@ fn parse_executable_path(executable: &str) -> ExecutableInfo {
 fn build_command(exec_info: &ExecutableInfo, args: &[&str]) -> Command {
     let mut command = Command::new(&exec_info.name);
     command.args(args);
-
-    if exec_info.directory != "." {
-        command.current_dir(&exec_info.directory);
-    }
-
+    command.current_dir(&exec_info.directory);
     command
 }
 
@@ -84,7 +74,7 @@ mod tests {
         let result = parse_executable_path("./bin/my_program");
         assert_eq!(result, ExecutableInfo {
             name: "my_program".to_string(),
-            directory: "./bin".to_string(),
+            directory: ".".to_string(),
         });
     }
 
@@ -93,7 +83,7 @@ mod tests {
         let result = parse_executable_path("/usr/bin/python3.9");
         assert_eq!(result, ExecutableInfo {
             name: "python3.9".to_string(),
-            directory: "/usr/bin".to_string(),
+            directory: ".".to_string(),
         });
     }
 
@@ -102,7 +92,7 @@ mod tests {
         let result = parse_executable_path("/program");
         assert_eq!(result, ExecutableInfo {
             name: "program".to_string(),
-            directory: "/".to_string(),
+            directory: ".".to_string(),
         });
     }
 
@@ -130,7 +120,7 @@ mod tests {
         let result = parse_executable_path("/bin//ls");
         assert_eq!(result, ExecutableInfo {
             name: "ls".to_string(),
-            directory: "/bin".to_string(),
+            directory: ".".to_string(),
         });
     }
 
@@ -139,7 +129,7 @@ mod tests {
         let result = parse_executable_path("/bin/my-special_program.v2");
         assert_eq!(result, ExecutableInfo {
             name: "my-special_program.v2".to_string(),
-            directory: "/bin".to_string(),
+            directory: ".".to_string(),
         });
     }
 
@@ -152,7 +142,7 @@ mod tests {
         let command = build_command(&exec_info, &["--help"]);
 
         let debug_str = format!("{:?}", command);
-        assert_eq!(debug_str, "\"ls\" \"--help\"");
+        assert_eq!(debug_str, "cd \".\" && \"ls\" \"--help\"");
     }
 
     #[test]
@@ -176,7 +166,7 @@ mod tests {
         let command = build_command(&exec_info, &["-r", "pattern", "."]);
         
         let debug_str = format!("{:?}", command);
-        assert_eq!(debug_str, "\"grep\" \"-r\" \"pattern\" \".\"");
+        assert_eq!(debug_str, "cd \".\" && \"grep\" \"-r\" \"pattern\" \".\"");
     }
 
     #[test]
@@ -188,7 +178,7 @@ mod tests {
         let command = build_command(&exec_info, &[]);
         
         let debug_str = format!("{:?}", command);
-        assert_eq!(debug_str, ("\"pwd\""));
+        assert_eq!(debug_str, ("cd \".\" && \"pwd\""));
     }
 
     #[test]
@@ -200,9 +190,9 @@ mod tests {
         let command = build_command(&exec_info, args);
         
         assert_eq!(exec_info.name, "ls");
-        assert_eq!(exec_info.directory, "/bin");
+        assert_eq!(exec_info.directory, ".");
         
         let debug_str = format!("{:?}", command);
-        assert_eq!(debug_str, "cd \"/bin\" && \"ls\" \"-la\" \"/tmp\"");
+        assert_eq!(debug_str, "cd \".\" && \"ls\" \"-la\" \"/tmp\"");
     }
 }
