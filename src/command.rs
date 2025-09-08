@@ -14,15 +14,17 @@ pub(crate) enum ShellCommand {
 
 impl ShellCommand {
 
-    pub(crate) fn run(&self, args: &[&str], stdout_redirect_filename: Option<&str>) -> () {
+    pub(crate) fn run(&self, parsed_command: &ParsedCommand) -> () {
+        let args = parsed_command.get_args();
+        let stdout_redirect_filename = parsed_command.stdout_redirect_filename.as_ref().map(|s| s.as_str());
         match self {
-            ShellCommand::Cd => builtin::cd::run(args),
-            ShellCommand::Echo => builtin::echo::run(args, stdout_redirect_filename),
-            ShellCommand::Exec { executable } => exec::run(args, executable, stdout_redirect_filename),
-            ShellCommand::Exit => builtin::exit::run(args),
-            ShellCommand::Pwd => builtin::pwd::run(args),
+            ShellCommand::Cd => builtin::cd::run(args.as_slice()),
+            ShellCommand::Echo => builtin::echo::run(args.as_slice(), stdout_redirect_filename),
+            ShellCommand::Exec { executable } => exec::run(executable, parsed_command),
+            ShellCommand::Exit => builtin::exit::run(args.as_slice()),
+            ShellCommand::Pwd => builtin::pwd::run(args.as_slice()),
             ShellCommand::Type { path, builtin_commands } =>
-                builtin::type_::run(args, path, builtin_commands.iter().map(|c| c.as_str()).collect::<Vec<&str>>() .as_slice()),
+                builtin::type_::run(args.as_slice(), path, builtin_commands.iter().map(|c| c.as_str()).collect::<Vec<&str>>() .as_slice()),
         }
     }
 }

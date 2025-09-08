@@ -8,13 +8,13 @@ use crate::command::{ParsedCommand, ShellCommand};
 mod path;
 mod command;
 
-fn execute<F, R>(f: F, command_and_args: &[&str]) -> ()
+fn execute<F, R>(f: F) -> ()
 where
-  F: Fn(&[&str]) -> R,
+  F: Fn() -> R,
   R: Debug
 {
     match panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        f(command_and_args)
+        f()
     })) {
         Ok(_) => (),
         Err(err) => {
@@ -46,14 +46,13 @@ fn main() -> Result<(), anyhow::Error> {
         let parsed_command = ParsedCommand::parse_command(&input)?;
         if let Some(parsed_command) = parsed_command {
             let command = &parsed_command.command;
-            let args = &parsed_command.get_args();
             if let Some(builtin_command) = builtin_commands.get(command.as_str()) {
-                execute(|command_and_args| builtin_command.run(command_and_args, parsed_command.stdout_redirect_filename.as_deref()), &args);
+                execute(|| builtin_command.run(&parsed_command));
             } else if let Some(found_executable) = path.find_command(command.as_str()) {
                 let command = command::ShellCommand::Exec {
                     executable: found_executable
                 };
-                execute(|command_and_args| command.run(command_and_args, parsed_command.stdout_redirect_filename.as_deref()), &args);
+                execute(|| command.run(&parsed_command));
             } else {
                 println!("{}: command not found", command.trim());
             }
