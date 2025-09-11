@@ -17,7 +17,7 @@ pub(crate) fn run(executable: &str, parsed_command: &ParsedCommand) -> () {
     let output = command
         .output()
         .expect(&format!("Failed to execute process {}", parsed_command.command.as_str()));
-    
+
     write_output(&parsed_command.stdout_redirect_filename, &output.stdout);
     write_output(&parsed_command.stderr_redirect_filename, &output.stderr);
 }

@@ -16,10 +16,9 @@ impl ShellCommand {
 
     pub(crate) fn run(&self, parsed_command: &ParsedCommand) -> () {
         let args = parsed_command.get_args();
-        let stdout_redirect_filename = parsed_command.stdout_redirect_filename.as_ref().map(|s| s.as_str());
         match self {
             ShellCommand::Cd => builtin::cd::run(args.as_slice()),
-            ShellCommand::Echo => builtin::echo::run(args.as_slice(), stdout_redirect_filename),
+            ShellCommand::Echo => builtin::echo::run(args.as_slice(), parsed_command),
             ShellCommand::Exec { executable } => exec::run(executable, parsed_command),
             ShellCommand::Exit => builtin::exit::run(args.as_slice()),
             ShellCommand::Pwd => builtin::pwd::run(args.as_slice()),
