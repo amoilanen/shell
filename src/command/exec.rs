@@ -18,8 +18,8 @@ pub(crate) fn run(executable: &str, parsed_command: &ParsedCommand) -> () {
         .output()
         .expect(&format!("Failed to execute process {}", parsed_command.command.as_str()));
 
-    write_output(&parsed_command.stdout_redirect_filename, &output.stdout);
-    write_output(&parsed_command.stderr_redirect_filename, &output.stderr);
+    write_output(&parsed_command.stdout_redirect.as_ref().map(|r| (r.filename.as_str(), r.should_append)), &output.stdout);
+    write_output(&parsed_command.stderr_redirect.as_ref().map(|r| (r.filename.as_str(), r.should_append)), &output.stderr);
 }
 
 fn parse_executable_path(executable: &str) -> ExecutableInfo {
@@ -42,19 +42,20 @@ fn build_command(exec_info: &ExecutableInfo, args: &[&str]) -> Command {
     command
 }
 
-fn write_output(filename: &Option<String>, content: &[u8]) -> () {
-    if let Some(filename) = filename {
-        write_output_to_file(&filename, content).unwrap();
+fn write_output(filename_and_append: &Option<(&str, bool)>, content: &[u8]) -> () {
+    if let Some((filename, should_append)) = filename_and_append {
+        write_output_to_file(&filename, content, *should_append).unwrap();
     } else {
         print!("{}", String::from_utf8_lossy(content));
     }
 }
 
-fn write_output_to_file(filename: &str, content: &[u8]) -> Result<(), std::io::Error> {
+fn write_output_to_file(filename: &str, content: &[u8], should_append: bool) -> Result<(), std::io::Error> {
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
-        .truncate(true)
+        .append(should_append)
+        .truncate(!should_append)
         .open(filename)?;
     file.write_all(content)?;
     Ok(())
@@ -71,8 +72,8 @@ mod tests {
         ParsedCommand {
             command: command.to_string(),
             args,
-            stdout_redirect_filename: stdout_redirect,
-            stderr_redirect_filename: stderr_redirect
+            stdout_redirect: stdout_redirect.map(|filename| crate::command::Redirect { filename, should_append: false }),
+            stderr_redirect: stderr_redirect.map(|filename| crate::command::Redirect { filename, should_append: false })
         }
     }
 
@@ -333,5 +334,57 @@ mod tests {
         
         assert_file_empty_or_missing(&stdout_path, "Stdout file should be empty when command produces no stdout");
         cleanup_files(&[&stdout_path]);
+    }
+
+    #[test]
+    fn test_stdout_redirect_append_mode() {
+        let stdout_path = create_temp_file_path("test_stdout_append.txt");
+
+        let initial_content = "initial content\n";
+        write_output_to_file(&stdout_path, initial_content.as_bytes(), false).unwrap();
+
+        let parsed_command = ParsedCommand {
+            command: "echo".to_string(),
+            args: vec!["appended content".to_string()],
+            stdout_redirect: Some(crate::command::Redirect { 
+                filename: stdout_path.clone(), 
+                should_append: true 
+            }),
+            stderr_redirect: None
+        };
+        
+        run("echo", &parsed_command);
+        
+        let content = read_file_content(&stdout_path);
+        assert!(content.contains("initial content\nappended content\n"), "File should contain all content");
+
+        cleanup_files(&[&stdout_path]);
+    }
+
+    #[test]
+    fn test_stderr_redirect_append_mode() {
+        let stderr_path = create_temp_file_path("test_stderr_append.txt");
+
+        let initial_content = "initial error\n";
+        write_output_to_file(&stderr_path, initial_content.as_bytes(), false).unwrap();
+
+        let parsed_command = ParsedCommand {
+            command: "ls".to_string(),
+            args: vec!["/nonexistent_directory".to_string()],
+            stdout_redirect: None,
+            stderr_redirect: Some(crate::command::Redirect { 
+                filename: stderr_path.clone(), 
+                should_append: true 
+            })
+        };
+        
+        run("ls", &parsed_command);
+        
+        let content = read_file_content(&stderr_path);
+        assert!(content.contains("initial error"), "File should contain initial content");
+        // The exact error message may vary, but there should be some error content
+        assert!(content.len() > initial_content.len(), "File should have more content after append");
+
+        cleanup_files(&[&stderr_path]);
     }
 }

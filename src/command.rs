@@ -29,11 +29,17 @@ impl ShellCommand {
 }
 
 #[derive(Debug, PartialEq)]
+pub(crate) struct Redirect {
+    pub(crate) filename: String,
+    pub(crate) should_append: bool
+}
+
+#[derive(Debug, PartialEq)]
 pub(crate) struct ParsedCommand {
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
-    pub(crate) stdout_redirect_filename: Option<String>,
-    pub(crate) stderr_redirect_filename: Option<String>
+    pub(crate) stdout_redirect: Option<Redirect>,
+    pub(crate) stderr_redirect: Option<Redirect>
 }
 
 impl ParsedCommand {
@@ -45,14 +51,28 @@ impl ParsedCommand {
         }
         let mut terms_without_redirect: Vec<String> = Vec::new();
         let mut idx = 0;
-        let mut stdout_redirect_filename: Option<String> = None;
-        let mut stderr_redirect_filename: Option<String> = None;
+        let mut stdout_redirect: Option<Redirect> = None;
+        let mut stderr_redirect: Option<Redirect> = None;
         while idx < terms.len() {
-            if terms[idx].starts_with(">") || terms[idx].starts_with("1>") {
-                stdout_redirect_filename = terms.get(idx + 1).map(|s| s.to_owned());
+            if terms[idx] == ">" || terms[idx] == "1>" {
+                let stdout_redirect_filename = terms.get(idx + 1).map(|s| s.to_owned());
+                let filename = stdout_redirect_filename.ok_or_else(|| anyhow::anyhow!("Missing filename for stdout redirect: {}", input))?;
+                stdout_redirect = Some(Redirect { filename, should_append: false });
                 idx = idx + 2;
-            } else if terms[idx].starts_with("2>") {
-                stderr_redirect_filename = terms.get(idx + 1).map(|s| s.to_owned());
+            } else if terms[idx] == "2>" {
+                let stderr_redirect_filename = terms.get(idx + 1).map(|s| s.to_owned());
+                let filename = stderr_redirect_filename.ok_or_else(|| anyhow::anyhow!("Missing filename for stderr redirect: {}", input))?;
+                stderr_redirect = Some(Redirect { filename, should_append: false });
+                idx = idx + 2;
+            } else if terms[idx] == ">>" || terms[idx] == "1>>" {
+                let stdout_redirect_filename = terms.get(idx + 1).map(|s| s.to_owned());
+                let filename = stdout_redirect_filename.ok_or_else(|| anyhow::anyhow!("Missing filename for stdout append redirect: {}", input))?;
+                stdout_redirect = Some(Redirect { filename, should_append: true });
+                idx = idx + 2;
+            } else if terms[idx] == "2>>" {
+                let stderr_redirect_filename = terms.get(idx + 1).map(|s| s.to_owned());
+                let filename = stderr_redirect_filename.ok_or_else(|| anyhow::anyhow!("Missing filename for stderr append redirect: {}", input))?;
+                stderr_redirect = Some(Redirect { filename, should_append: true });
                 idx = idx + 2;
             } else {
                 terms_without_redirect.push(terms[idx].clone());
@@ -61,7 +81,7 @@ impl ParsedCommand {
         }
         if let Some(command) = terms_without_redirect.get(0) {
             let args = terms_without_redirect[1..].to_vec();
-            Ok(Some(ParsedCommand { command: command.clone(), args, stdout_redirect_filename, stderr_redirect_filename }))
+            Ok(Some(ParsedCommand { command: command.clone(), args, stdout_redirect, stderr_redirect }))
         } else {
             Err(anyhow::anyhow!("No command provided: {}", input))
         }
@@ -150,8 +170,8 @@ mod tests {
         ParsedCommand {
             command: command.to_string(),
             args: args.into_iter().map(|s| s.to_string()).collect(),
-            stdout_redirect_filename: stdout_redirect_filename.map(|s| s.to_string()),
-            stderr_redirect_filename: None
+            stdout_redirect: stdout_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: false }),
+            stderr_redirect: None
         }
     }
 
@@ -159,8 +179,8 @@ mod tests {
         ParsedCommand {
             command: command.to_string(),
             args: args.into_iter().map(|s| s.to_string()).collect(),
-            stdout_redirect_filename: None,
-            stderr_redirect_filename: stderr_redirect_filename.map(|s| s.to_string())
+            stdout_redirect: None,
+            stderr_redirect: stderr_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: false })
         }
     }
 
@@ -168,8 +188,8 @@ mod tests {
         ParsedCommand {
             command: command.to_string(),
             args: args.into_iter().map(|s| s.to_string()).collect(),
-            stdout_redirect_filename: stdout_redirect_filename.map(|s| s.to_string()),
-            stderr_redirect_filename: stderr_redirect_filename.map(|s| s.to_string())
+            stdout_redirect: stdout_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: false }),
+            stderr_redirect: stderr_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: false })
         }
     }
 
@@ -456,4 +476,6 @@ mod tests {
         assert_eq!(result, Some(cmd("echo", vec!["\"start\" and \"end\""])));
         Ok(())
     }
+
+    //TODO: Add tests for stdout and stderr append redirect
 }
