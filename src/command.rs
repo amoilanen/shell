@@ -204,62 +204,28 @@ impl ParsedCommand {
 mod tests {
     use super::*;
 
-    fn cmd_with_stdout_redirect(command: &str, args: Vec<&str>, stdout_redirect_filename: Option<&str>) -> ParsedCommand {
+    fn cmd_with_redirects(
+        command: &str,
+        args: Vec<&str>,
+        stdout_redirect: Option<(&str, bool)>,
+        stderr_redirect: Option<(&str, bool)>
+    ) -> ParsedCommand {
         ParsedCommand {
             command: command.to_string(),
             args: args.into_iter().map(|s| s.to_string()).collect(),
-            stdout_redirect: stdout_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: false }),
-            stderr_redirect: None
-        }
-    }
-
-    fn cmd_with_stdout_append_redirect(command: &str, args: Vec<&str>, stdout_redirect_filename: Option<&str>) -> ParsedCommand {
-        ParsedCommand {
-            command: command.to_string(),
-            args: args.into_iter().map(|s| s.to_string()).collect(),
-            stdout_redirect: stdout_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: true }),
-            stderr_redirect: None
-        }
-    }
-
-    fn cmd_with_stderr_redirect(command: &str, args: Vec<&str>, stderr_redirect_filename: Option<&str>) -> ParsedCommand {
-        ParsedCommand {
-            command: command.to_string(),
-            args: args.into_iter().map(|s| s.to_string()).collect(),
-            stdout_redirect: None,
-            stderr_redirect: stderr_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: false })
-        }
-    }
-
-    fn cmd_with_stderr_append_redirect(command: &str, args: Vec<&str>, stderr_redirect_filename: Option<&str>) -> ParsedCommand {
-        ParsedCommand {
-            command: command.to_string(),
-            args: args.into_iter().map(|s| s.to_string()).collect(),
-            stdout_redirect: None,
-            stderr_redirect: stderr_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: true })
-        }
-    }
-
-    fn cmd_with_redirects(command: &str, args: Vec<&str>, stdout_redirect_filename: Option<&str>, stderr_redirect_filename: Option<&str>) -> ParsedCommand {
-        ParsedCommand {
-            command: command.to_string(),
-            args: args.into_iter().map(|s| s.to_string()).collect(),
-            stdout_redirect: stdout_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: false }),
-            stderr_redirect: stderr_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: false })
-        }
-    }
-
-    fn cmd_with_append_redirects(command: &str, args: Vec<&str>, stdout_redirect_filename: Option<&str>, stderr_redirect_filename: Option<&str>) -> ParsedCommand {
-        ParsedCommand {
-            command: command.to_string(),
-            args: args.into_iter().map(|s| s.to_string()).collect(),
-            stdout_redirect: stdout_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: true }),
-            stderr_redirect: stderr_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: true })
+            stdout_redirect: stdout_redirect.map(|(filename, should_append)| Redirect {
+                filename: filename.to_string(),
+                should_append
+            }),
+            stderr_redirect: stderr_redirect.map(|(filename, should_append)| Redirect {
+                filename: filename.to_string(),
+                should_append
+            })
         }
     }
 
     fn cmd(command: &str, args: Vec<&str>) -> ParsedCommand {
-        cmd_with_stdout_redirect(command, args, None)
+        cmd_with_redirects(command, args, None, None)
     }
 
     #[test]
@@ -300,28 +266,28 @@ mod tests {
     #[test]
     fn test_parse_ls_with_stdout_redirect() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("ls /tmp/baz > /tmp/foo/baz.md")?;
-        assert_eq!(result, Some(cmd_with_stdout_redirect("ls", vec!["/tmp/baz"], Some("/tmp/foo/baz.md"))));
+        assert_eq!(result, Some(cmd_with_redirects("ls", vec!["/tmp/baz"], Some(("/tmp/foo/baz.md", false)), None)));
         Ok(())
     }
 
     #[test]
     fn test_parse_cat_with_stdout_wordier_redirect() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("cat /tmp/baz/blueberry nonexistent 1> /tmp/foo/quz.md")?;
-        assert_eq!(result, Some(cmd_with_stdout_redirect("cat", vec!["/tmp/baz/blueberry", "nonexistent"], Some("/tmp/foo/quz.md"))));
+        assert_eq!(result, Some(cmd_with_redirects("cat", vec!["/tmp/baz/blueberry", "nonexistent"], Some(("/tmp/foo/quz.md", false)), None)));
         Ok(())
     }
 
     #[test]
     fn test_parse_ls_with_stderr_redirect() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("ls /tmp/baz 2> /tmp/foo/baz.md")?;
-        assert_eq!(result, Some(cmd_with_stderr_redirect("ls", vec!["/tmp/baz"], Some("/tmp/foo/baz.md"))));
+        assert_eq!(result, Some(cmd_with_redirects("ls", vec!["/tmp/baz"], None, Some(("/tmp/foo/baz.md", false)))));
         Ok(())
     }
 
     #[test]
     fn test_parse_ls_with_stdout_and_stderr_redirect() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("ls /tmp/baz 1> /tmp/foo/baz1.md 2> /tmp/foo/baz2.md")?;
-        assert_eq!(result, Some(cmd_with_redirects("ls", vec!["/tmp/baz"], Some("/tmp/foo/baz1.md"), Some("/tmp/foo/baz2.md"))));
+        assert_eq!(result, Some(cmd_with_redirects("ls", vec!["/tmp/baz"], Some(("/tmp/foo/baz1.md", false)), Some(("/tmp/foo/baz2.md", false)))));
         Ok(())
     }
 
@@ -545,28 +511,28 @@ mod tests {
     #[test]
     fn test_parse_ls_with_stdout_append_redirect() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("ls /tmp/baz >> /tmp/foo/baz.md")?;
-        assert_eq!(result, Some(cmd_with_stdout_append_redirect("ls", vec!["/tmp/baz"], Some("/tmp/foo/baz.md"))));
+        assert_eq!(result, Some(cmd_with_redirects("ls", vec!["/tmp/baz"], Some(("/tmp/foo/baz.md", true)), None)));
         Ok(())
     }
 
     #[test]
     fn test_parse_cat_with_stdout_append_redirect_with_fd() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("cat /tmp/file.txt 1>> /tmp/output.log")?;
-        assert_eq!(result, Some(cmd_with_stdout_append_redirect("cat", vec!["/tmp/file.txt"], Some("/tmp/output.log"))));
+        assert_eq!(result, Some(cmd_with_redirects("cat", vec!["/tmp/file.txt"], Some(("/tmp/output.log", true)), None)));
         Ok(())
     }
 
     #[test]
     fn test_parse_ls_with_stderr_append_redirect() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("ls /nonexistent 2>> /tmp/errors.log")?;
-        assert_eq!(result, Some(cmd_with_stderr_append_redirect("ls", vec!["/nonexistent"], Some("/tmp/errors.log"))));
+        assert_eq!(result, Some(cmd_with_redirects("ls", vec!["/nonexistent"], None, Some(("/tmp/errors.log", true)))));
         Ok(())
     }
 
     #[test]
     fn test_parse_ls_with_both_append_redirects() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("ls /tmp 1>> /tmp/output.log 2>> /tmp/errors.log")?;
-        assert_eq!(result, Some(cmd_with_append_redirects("ls", vec!["/tmp"], Some("/tmp/output.log"), Some("/tmp/errors.log"))));
+        assert_eq!(result, Some(cmd_with_redirects("ls", vec!["/tmp"], Some(("/tmp/output.log", true)), Some(("/tmp/errors.log", true)))));
         Ok(())
     }
 
@@ -586,42 +552,42 @@ mod tests {
     #[test]
     fn test_parse_no_space_stdout_redirect() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("echo hello >output.txt")?;
-        assert_eq!(result, Some(cmd_with_stdout_redirect("echo", vec!["hello"], Some("output.txt"))));
+        assert_eq!(result, Some(cmd_with_redirects("echo", vec!["hello"], Some(("output.txt", false)), None)));
         Ok(())
     }
 
     #[test]
     fn test_parse_no_space_stdout_redirect_with_fd() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("cat file.txt 1>output.txt")?;
-        assert_eq!(result, Some(cmd_with_stdout_redirect("cat", vec!["file.txt"], Some("output.txt"))));
+        assert_eq!(result, Some(cmd_with_redirects("cat", vec!["file.txt"], Some(("output.txt", false)), None)));
         Ok(())
     }
 
     #[test]
     fn test_parse_no_space_stderr_redirect() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("ls /nonexistent 2>errors.log")?;
-        assert_eq!(result, Some(cmd_with_stderr_redirect("ls", vec!["/nonexistent"], Some("errors.log"))));
+        assert_eq!(result, Some(cmd_with_redirects("ls", vec!["/nonexistent"], None, Some(("errors.log", false)))));
         Ok(())
     }
 
     #[test]
     fn test_parse_no_space_stdout_append_redirect() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("echo hello >>output.log")?;
-        assert_eq!(result, Some(cmd_with_stdout_append_redirect("echo", vec!["hello"], Some("output.log"))));
+        assert_eq!(result, Some(cmd_with_redirects("echo", vec!["hello"], Some(("output.log", true)), None)));
         Ok(())
     }
 
     #[test]
     fn test_parse_no_space_stdout_append_redirect_with_fd() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("cat file.txt 1>>output.log")?;
-        assert_eq!(result, Some(cmd_with_stdout_append_redirect("cat", vec!["file.txt"], Some("output.log"))));
+        assert_eq!(result, Some(cmd_with_redirects("cat", vec!["file.txt"], Some(("output.log", true)), None)));
         Ok(())
     }
 
     #[test]
     fn test_parse_no_space_stderr_append_redirect() -> Result<(), anyhow::Error> {
         let result = ParsedCommand::parse_command("ls /nonexistent 2>>errors.log")?;
-        assert_eq!(result, Some(cmd_with_stderr_append_redirect("ls", vec!["/nonexistent"], Some("errors.log"))));
+        assert_eq!(result, Some(cmd_with_redirects("ls", vec!["/nonexistent"], None, Some(("errors.log", true)))));
         Ok(())
     }
 
