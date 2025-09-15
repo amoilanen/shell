@@ -102,13 +102,19 @@ impl ParsedCommand {
         let mut inside_double_quotes = false;
         let mut current_part = String::new();
         let mut is_escaped_character = false;
-        for ch in input.chars() {
+        let chars: Vec<char> = input.chars().collect();
+        let mut i = 0;
+
+        while i < chars.len() {
+            let ch = chars[i];
+
             if inside_single_quotes {
                 if ch == '\'' {
                     inside_single_quotes = false;
                 } else {
                     current_part.push(ch);
                 }
+                i += 1;
             } else if inside_double_quotes {
                 if is_escaped_character {
                     if ch == '\"' || ch == '\\' || ch == '$' || ch == '`' {
@@ -131,31 +137,63 @@ impl ParsedCommand {
                 } else {
                     current_part.push(ch);
                 }
+                i += 1;
             } else {
                 if is_escaped_character {
                     is_escaped_character = false;
-                    current_part.push(ch)
+                    current_part.push(ch);
+                    i += 1;
                 } else if ch == '\\' {
                     is_escaped_character = true;
+                    i += 1;
                 } else if ch == '\'' {
                     inside_single_quotes = true;
+                    i += 1;
                 } else if ch == '"' {
                     inside_double_quotes = true;
+                    i += 1;
                 } else if ch == ' ' {
                     if current_part.len() > 0 {
                         result.push(current_part.clone());
                         current_part = String::new();
                     }
+                    i += 1;
                 } else {
-                    current_part.push(ch);
+                    let redirect_patterns = ["2>>", "1>>", ">>", "2>", "1>", ">"];
+                    let mut found_redirect = false;
+
+                    for pattern in redirect_patterns.iter() {
+                        if i + pattern.len() <= chars.len() {
+                            let potential_match: String = chars[i..i + pattern.len()].iter().collect();
+                            // Found a redirect operator
+                            if potential_match == *pattern {
+                                if current_part.len() > 0 {
+                                    result.push(current_part.clone());
+                                    current_part = String::new();
+                                }
+                                result.push(pattern.to_string());
+                                i += pattern.len();
+                                found_redirect = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if !found_redirect {
+                        current_part.push(ch);
+                        i += 1;
+                    }
                 }
             }
         }
+
         if current_part.len() > 0 {
             result.push(current_part);
         }
+
         Ok(result)
     }
+
 
     pub(crate) fn get_args(&self) -> Vec<&str> {
         self.args.iter().map(|arg| arg.as_str()).collect::<Vec<&str>>()
@@ -175,6 +213,15 @@ mod tests {
         }
     }
 
+    fn cmd_with_stdout_append_redirect(command: &str, args: Vec<&str>, stdout_redirect_filename: Option<&str>) -> ParsedCommand {
+        ParsedCommand {
+            command: command.to_string(),
+            args: args.into_iter().map(|s| s.to_string()).collect(),
+            stdout_redirect: stdout_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: true }),
+            stderr_redirect: None
+        }
+    }
+
     fn cmd_with_stderr_redirect(command: &str, args: Vec<&str>, stderr_redirect_filename: Option<&str>) -> ParsedCommand {
         ParsedCommand {
             command: command.to_string(),
@@ -184,12 +231,30 @@ mod tests {
         }
     }
 
+    fn cmd_with_stderr_append_redirect(command: &str, args: Vec<&str>, stderr_redirect_filename: Option<&str>) -> ParsedCommand {
+        ParsedCommand {
+            command: command.to_string(),
+            args: args.into_iter().map(|s| s.to_string()).collect(),
+            stdout_redirect: None,
+            stderr_redirect: stderr_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: true })
+        }
+    }
+
     fn cmd_with_redirects(command: &str, args: Vec<&str>, stdout_redirect_filename: Option<&str>, stderr_redirect_filename: Option<&str>) -> ParsedCommand {
         ParsedCommand {
             command: command.to_string(),
             args: args.into_iter().map(|s| s.to_string()).collect(),
             stdout_redirect: stdout_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: false }),
             stderr_redirect: stderr_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: false })
+        }
+    }
+
+    fn cmd_with_append_redirects(command: &str, args: Vec<&str>, stdout_redirect_filename: Option<&str>, stderr_redirect_filename: Option<&str>) -> ParsedCommand {
+        ParsedCommand {
+            command: command.to_string(),
+            args: args.into_iter().map(|s| s.to_string()).collect(),
+            stdout_redirect: stdout_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: true }),
+            stderr_redirect: stderr_redirect_filename.map(|s| Redirect { filename: s.to_string(), should_append: true })
         }
     }
 
@@ -477,5 +542,99 @@ mod tests {
         Ok(())
     }
 
-    //TODO: Add tests for stdout and stderr append redirect
+    #[test]
+    fn test_parse_ls_with_stdout_append_redirect() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("ls /tmp/baz >> /tmp/foo/baz.md")?;
+        assert_eq!(result, Some(cmd_with_stdout_append_redirect("ls", vec!["/tmp/baz"], Some("/tmp/foo/baz.md"))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_cat_with_stdout_append_redirect_with_fd() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("cat /tmp/file.txt 1>> /tmp/output.log")?;
+        assert_eq!(result, Some(cmd_with_stdout_append_redirect("cat", vec!["/tmp/file.txt"], Some("/tmp/output.log"))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_ls_with_stderr_append_redirect() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("ls /nonexistent 2>> /tmp/errors.log")?;
+        assert_eq!(result, Some(cmd_with_stderr_append_redirect("ls", vec!["/nonexistent"], Some("/tmp/errors.log"))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_ls_with_both_append_redirects() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("ls /tmp 1>> /tmp/output.log 2>> /tmp/errors.log")?;
+        assert_eq!(result, Some(cmd_with_append_redirects("ls", vec!["/tmp"], Some("/tmp/output.log"), Some("/tmp/errors.log"))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_mixed_regular_and_append_redirects() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("cat file.txt > output.txt 2>> errors.log")?;
+        let expected = ParsedCommand {
+            command: "cat".to_string(),
+            args: vec!["file.txt".to_string()],
+            stdout_redirect: Some(Redirect { filename: "output.txt".to_string(), should_append: false }),
+            stderr_redirect: Some(Redirect { filename: "errors.log".to_string(), should_append: true })
+        };
+        assert_eq!(result, Some(expected));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_no_space_stdout_redirect() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("echo hello >output.txt")?;
+        assert_eq!(result, Some(cmd_with_stdout_redirect("echo", vec!["hello"], Some("output.txt"))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_no_space_stdout_redirect_with_fd() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("cat file.txt 1>output.txt")?;
+        assert_eq!(result, Some(cmd_with_stdout_redirect("cat", vec!["file.txt"], Some("output.txt"))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_no_space_stderr_redirect() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("ls /nonexistent 2>errors.log")?;
+        assert_eq!(result, Some(cmd_with_stderr_redirect("ls", vec!["/nonexistent"], Some("errors.log"))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_no_space_stdout_append_redirect() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("echo hello >>output.log")?;
+        assert_eq!(result, Some(cmd_with_stdout_append_redirect("echo", vec!["hello"], Some("output.log"))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_no_space_stdout_append_redirect_with_fd() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("cat file.txt 1>>output.log")?;
+        assert_eq!(result, Some(cmd_with_stdout_append_redirect("cat", vec!["file.txt"], Some("output.log"))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_no_space_stderr_append_redirect() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("ls /nonexistent 2>>errors.log")?;
+        assert_eq!(result, Some(cmd_with_stderr_append_redirect("ls", vec!["/nonexistent"], Some("errors.log"))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_no_space_multiple_redirects() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("cat file.txt 1>output.txt 2>>errors.log")?;
+        let expected = ParsedCommand {
+            command: "cat".to_string(),
+            args: vec!["file.txt".to_string()],
+            stdout_redirect: Some(Redirect { filename: "output.txt".to_string(), should_append: false }),
+            stderr_redirect: Some(Redirect { filename: "errors.log".to_string(), should_append: true })
+        };
+        assert_eq!(result, Some(expected));
+        Ok(())
+    }
 }
