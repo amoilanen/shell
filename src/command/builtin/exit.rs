@@ -1,10 +1,11 @@
 use std::process;
 
-pub(crate) fn run(args: &[&str]) -> () {
+pub(crate) fn run(args: &[&str]) -> Result<(), anyhow::Error> {
     let exit_code = parse_exit_code(args);
     if exit_code >= 0 {
         process::exit(exit_code);
     }
+    Ok(())
 }
 
 fn parse_exit_code(args: &[&str]) -> i32 {

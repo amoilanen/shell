@@ -14,7 +14,7 @@ pub(crate) enum ShellCommand {
 
 impl ShellCommand {
 
-    pub(crate) fn run(&self, parsed_command: &ParsedCommand) -> () {
+    pub(crate) fn run(&self, parsed_command: &ParsedCommand) -> Result<(), anyhow::Error> {
         let args = parsed_command.get_args();
         match self {
             ShellCommand::Cd => builtin::cd::run(args.as_slice()),

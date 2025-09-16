@@ -2,21 +2,23 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::env;
 use std::panic;
-use std::fmt::Debug;
 use crate::command::{ParsedCommand, ShellCommand};
 
 mod path;
 mod command;
 
-fn execute<F, R>(f: F) -> ()
+fn execute<F>(f: F) -> ()
 where
-  F: Fn() -> R,
-  R: Debug
+  F: Fn() -> Result<(), anyhow::Error>,
 {
     match panic::catch_unwind(panic::AssertUnwindSafe(|| {
         f()
     })) {
-        Ok(_) => (),
+        Ok(result) => {
+            if let Err(err) = result {
+                eprintln!("{}", err);
+            }
+        },
         Err(err) => {
             println!("{:?}", err);
             ()

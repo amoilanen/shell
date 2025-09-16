@@ -10,16 +10,17 @@ struct ExecutableInfo {
     pub directory: String,
 }
 
-pub(crate) fn run(executable: &str, parsed_command: &ParsedCommand) -> () {
+pub(crate) fn run(executable: &str, parsed_command: &ParsedCommand) -> Result<(), anyhow::Error> {
     let exec_info = parse_executable_path(executable);
     let mut command = build_command(&exec_info, parsed_command.args.iter().map(|a| a.as_str()).collect::<Vec<&str>>().as_slice());
-    
+
     let output = command
         .output()
-        .expect(&format!("Failed to execute process {}", parsed_command.command.as_str()));
+        .map_err(|e| anyhow::anyhow!("Failed to execute process {}: {}", parsed_command.command.as_str(), e))?;
 
-    write_output(&parsed_command.stdout_redirect.as_ref().map(|r| (r.filename.as_str(), r.should_append)), &output.stdout);
-    write_output(&parsed_command.stderr_redirect.as_ref().map(|r| (r.filename.as_str(), r.should_append)), &output.stderr);
+    write_output(&parsed_command.stdout_redirect.as_ref().map(|r| (r.filename.as_str(), r.should_append)), &output.stdout)?;
+    write_output(&parsed_command.stderr_redirect.as_ref().map(|r| (r.filename.as_str(), r.should_append)), &output.stderr)?;
+    Ok(())
 }
 
 fn parse_executable_path(executable: &str) -> ExecutableInfo {
@@ -42,12 +43,14 @@ fn build_command(exec_info: &ExecutableInfo, args: &[&str]) -> Command {
     command
 }
 
-fn write_output(filename_and_append: &Option<(&str, bool)>, content: &[u8]) -> () {
+fn write_output(filename_and_append: &Option<(&str, bool)>, content: &[u8]) -> Result<(), anyhow::Error> {
     if let Some((filename, should_append)) = filename_and_append {
-        write_output_to_file(&filename, content, *should_append).unwrap();
+        write_output_to_file(&filename, content, *should_append)
+            .map_err(|e| anyhow::anyhow!("Failed to write output to file '{}': {}", filename, e))?;
     } else {
         print!("{}", String::from_utf8_lossy(content));
     }
+    Ok(())
 }
 
 fn write_output_to_file(filename: &str, content: &[u8], should_append: bool) -> Result<(), std::io::Error> {
@@ -83,11 +86,13 @@ mod tests {
         file_path.to_string_lossy().to_string()
     }
 
-    fn read_file_content(path: &str) -> String {
+    fn read_file_content(path: &str) -> Result<String, anyhow::Error> {
         let mut content = String::new();
-        let mut file = fs::File::open(path).expect(&format!("Failed to open file: {}", path));
-        file.read_to_string(&mut content).expect(&format!("Failed to read file: {}", path));
-        content
+        let mut file = fs::File::open(path)
+            .map_err(|e| anyhow::anyhow!("Failed to open file '{}': {}", path, e))?;
+        file.read_to_string(&mut content)
+            .map_err(|e| anyhow::anyhow!("Failed to read file '{}': {}", path, e))?;
+        Ok(content)
     }
 
     fn cleanup_files(paths: &[&str]) {
@@ -96,16 +101,18 @@ mod tests {
         }
     }
 
-    fn assert_file_contains_error_message(path: &str, message: &str) {
-        let content = read_file_content(path);
+    fn assert_file_contains_error_message(path: &str, message: &str) -> Result<(), anyhow::Error> {
+        let content = read_file_content(path)?;
         assert!(content.contains(message), "File should contain error message, got: {}", content);
+        Ok(())
     }
 
-    fn assert_file_empty_or_missing(path: &str, context: &str) {
+    fn assert_file_empty_or_missing(path: &str, context: &str) -> Result<(), anyhow::Error> {
         if fs::metadata(path).is_ok() {
-            let content = read_file_content(path);
+            let content = read_file_content(path)?;
             assert_eq!(content, "", "{}", context);
         }
+        Ok(())
     }
 
     #[test]
@@ -245,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stderr_redirect_to_file() {
+    fn test_stderr_redirect_to_file() -> Result<(), anyhow::Error> {
         let stderr_path = create_temp_file_path("test_stderr.txt");
 
         let parsed_command = create_test_parsed_command(
@@ -255,14 +262,15 @@ mod tests {
             Some(stderr_path.clone())
         );
 
-        run("ls", &parsed_command);
+        run("ls", &parsed_command)?;
 
-        assert_file_contains_error_message(&stderr_path, "");
+        assert_file_contains_error_message(&stderr_path, "")?;
         cleanup_files(&[&stderr_path]);
+        Ok(())
     }
 
     #[test]
-    fn test_stderr_redirect_with_stdout_redirect() {
+    fn test_stderr_redirect_with_stdout_redirect() -> Result<(), anyhow::Error> {
         let stdout_path = create_temp_file_path("test_stdout.txt");
         let stderr_path = create_temp_file_path("test_stderr.txt");
 
@@ -273,20 +281,21 @@ mod tests {
             Some(stderr_path.clone())
         );
 
-        run("ls", &parsed_command);
+        run("ls", &parsed_command)?;
 
-        assert_file_contains_error_message(&stderr_path, "");
+        assert_file_contains_error_message(&stderr_path, "")?;
 
         let stdout_exists = fs::metadata(&stdout_path).is_ok();
         assert!(stdout_exists, "Stdout file should be created even when stderr is redirected");
-        
+
         cleanup_files(&[&stdout_path, &stderr_path]);
+        Ok(())
     }
 
     #[test]
-    fn test_stderr_redirect_empty_stderr() {
+    fn test_stderr_redirect_empty_stderr() -> Result<(), anyhow::Error> {
         let stderr_path = create_temp_file_path("test_empty_stderr.txt");
-        
+
         let parsed_command = create_test_parsed_command(
             "echo",
             vec!["hello".to_string()],
@@ -294,97 +303,104 @@ mod tests {
             Some(stderr_path.clone())
         );
 
-        run("echo", &parsed_command);
+        run("echo", &parsed_command)?;
 
-        assert_file_empty_or_missing(&stderr_path, "Stderr file should be empty when command produces no stderr");
+        assert_file_empty_or_missing(&stderr_path, "Stderr file should be empty when command produces no stderr")?;
         cleanup_files(&[&stderr_path]);
+        Ok(())
     }
 
     #[test]
-    fn test_stdout_redirect_to_file() {
+    fn test_stdout_redirect_to_file() -> Result<(), anyhow::Error> {
         let stdout_path = create_temp_file_path("test_stdout.txt");
-        
+
         let parsed_command = create_test_parsed_command(
             "echo",
             vec!["hello world".to_string()],
             Some(stdout_path.clone()),
             None
         );
-        
-        run("echo", &parsed_command);
-        
-        let content = read_file_content(&stdout_path);
+
+        run("echo", &parsed_command)?;
+
+        let content = read_file_content(&stdout_path)?;
         assert!(content.contains("hello world"), "Stdout file should contain command output");
-        
+
         cleanup_files(&[&stdout_path]);
+        Ok(())
     }
 
     #[test]
-    fn test_stdout_redirect_empty_stdout() {
+    fn test_stdout_redirect_empty_stdout() -> Result<(), anyhow::Error> {
         let stdout_path = create_temp_file_path("test_empty_stdout.txt");
-        
+
         let parsed_command = create_test_parsed_command(
             "ls",
             vec!["/nonexistent".to_string()],
             Some(stdout_path.clone()),
             None
         );
-        
-        run("ls", &parsed_command);
-        
-        assert_file_empty_or_missing(&stdout_path, "Stdout file should be empty when command produces no stdout");
+
+        run("ls", &parsed_command)?;
+
+        assert_file_empty_or_missing(&stdout_path, "Stdout file should be empty when command produces no stdout")?;
         cleanup_files(&[&stdout_path]);
+        Ok(())
     }
 
     #[test]
-    fn test_stdout_redirect_append_mode() {
+    fn test_stdout_redirect_append_mode() -> Result<(), anyhow::Error> {
         let stdout_path = create_temp_file_path("test_stdout_append.txt");
 
         let initial_content = "initial content\n";
-        write_output_to_file(&stdout_path, initial_content.as_bytes(), false).unwrap();
+        write_output_to_file(&stdout_path, initial_content.as_bytes(), false)
+            .map_err(|e| anyhow::anyhow!("Failed to write initial content: {}", e))?;
 
         let parsed_command = ParsedCommand {
             command: "echo".to_string(),
             args: vec!["appended content".to_string()],
-            stdout_redirect: Some(crate::command::Redirect { 
-                filename: stdout_path.clone(), 
-                should_append: true 
+            stdout_redirect: Some(crate::command::Redirect {
+                filename: stdout_path.clone(),
+                should_append: true
             }),
             stderr_redirect: None
         };
-        
-        run("echo", &parsed_command);
-        
-        let content = read_file_content(&stdout_path);
+
+        run("echo", &parsed_command)?;
+
+        let content = read_file_content(&stdout_path)?;
         assert!(content.contains("initial content\nappended content\n"), "File should contain all content");
 
         cleanup_files(&[&stdout_path]);
+        Ok(())
     }
 
     #[test]
-    fn test_stderr_redirect_append_mode() {
+    fn test_stderr_redirect_append_mode() -> Result<(), anyhow::Error> {
         let stderr_path = create_temp_file_path("test_stderr_append.txt");
 
         let initial_content = "initial error\n";
-        write_output_to_file(&stderr_path, initial_content.as_bytes(), false).unwrap();
+        write_output_to_file(&stderr_path, initial_content.as_bytes(), false)
+            .map_err(|e| anyhow::anyhow!("Failed to write initial content: {}", e))?;
 
         let parsed_command = ParsedCommand {
             command: "ls".to_string(),
             args: vec!["/nonexistent_directory".to_string()],
             stdout_redirect: None,
-            stderr_redirect: Some(crate::command::Redirect { 
-                filename: stderr_path.clone(), 
-                should_append: true 
+            stderr_redirect: Some(crate::command::Redirect {
+                filename: stderr_path.clone(),
+                should_append: true
             })
         };
-        
-        run("ls", &parsed_command);
-        
-        let content = read_file_content(&stderr_path);
+
+        run("ls", &parsed_command)?;
+
+        let content = read_file_content(&stderr_path)?;
         assert!(content.contains("initial error"), "File should contain initial content");
         // The exact error message may vary, but there should be some error content
         assert!(content.len() > initial_content.len(), "File should have more content after append");
 
         cleanup_files(&[&stderr_path]);
+        Ok(())
     }
 }
