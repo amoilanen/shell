@@ -3,9 +3,12 @@ use std::io::{self, Write};
 use std::env;
 use std::panic;
 use crate::command::{ParsedCommand, ShellCommand};
+use crate::input::autocompletion::AutoCompletion;
+use crate::input::read_line_with_completion;
 
 mod path;
 mod command;
+mod input;
 
 fn execute<F>(f: F) -> ()
 where
@@ -26,6 +29,7 @@ where
     }
 }
 
+
 fn main() -> Result<(), anyhow::Error> {
     let path = path::Path::parse(&env::var("PATH")?)?;
     let builtin_commands: HashMap<&str, ShellCommand> = [
@@ -39,12 +43,12 @@ fn main() -> Result<(), anyhow::Error> {
         })
     ].into_iter().collect();
 
+    let autocomplete = AutoCompletion::new(vec!["echo", "cd", "pwd", "exit", "type"]);
+
     loop {
-        let stdin = io::stdin();
-        let mut input = String::new();
         print!("$ ");
         io::stdout().flush()?;
-        stdin.read_line(&mut input)?;
+        let input = read_line_with_completion(&autocomplete)?;
         let parsed_command = ParsedCommand::parse_command(&input)?;
         if let Some(parsed_command) = parsed_command {
             let command = &parsed_command.command;
