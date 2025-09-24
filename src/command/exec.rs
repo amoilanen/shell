@@ -48,7 +48,7 @@ fn write_output(filename_and_append: &Option<(&str, bool)>, content: &[u8]) -> R
         write_output_to_file(&filename, content, *should_append)
             .map_err(|e| anyhow::anyhow!("Failed to write output to file '{}': {}", filename, e))?;
     } else {
-        print!("{}", String::from_utf8_lossy(content));
+        print!("\r{}", String::from_utf8_lossy(content));
     }
     Ok(())
 }

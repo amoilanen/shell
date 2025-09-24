@@ -14,7 +14,7 @@ pub(crate) fn run(args: &[&str], parsed_command: &ParsedCommand) -> Result<(), a
         file.write_all(to_output.as_bytes())
             .map_err(|e| anyhow::anyhow!("Failed to write to file '{}': {}", stdout_redirect.filename, e))?;
     } else {
-        print!("{}", to_output);
+        print!("\r{}", to_output);
     }
     if let Some(stderr_redirect) = &parsed_command.stderr_redirect {
         let mut file = OpenOptions::new()

@@ -7,12 +7,12 @@ pub(crate) fn run(args: &[&str], path: &path::Path, builtin_commands: &[&str]) -
             is_shell_builtin = true;
         }
         if is_shell_builtin {
-            println!("{} is a shell builtin", command_name.trim());
+            println!("\r{} is a shell builtin", command_name.trim());
         } else {
             if let Some(found_executable) = path.find_command(command_name.trim()) {
-                println!("{} is {}", command_name.trim(), found_executable);
+                println!("\r{} is {}", command_name.trim(), found_executable);
             } else {
-                println!("{}: not found", command_name.trim());
+                println!("\r{}: not found", command_name.trim());
             }
         }
     }

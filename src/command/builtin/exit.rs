@@ -2,6 +2,7 @@ use std::process;
 
 pub(crate) fn run(args: &[&str]) -> Result<(), anyhow::Error> {
     let exit_code = parse_exit_code(args);
+    println!("\r");
     if exit_code >= 0 {
         process::exit(exit_code);
     }

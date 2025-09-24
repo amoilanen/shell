@@ -1,9 +1,12 @@
 use std::io::{self, Write, Read};
+use termios::{Termios, tcsetattr, TCSANOW, ECHO, ICANON, IEXTEN, ISIG, IXON, ICRNL, OPOST, VMIN, VTIME};
 use crate::input::autocompletion::AutoCompletion;
 
 pub mod autocompletion;
 
 pub fn read_line_with_completion(autocomplete: &AutoCompletion) -> Result<String, anyhow::Error> {
+    // Enable raw mode so we can read a byte at a time (including Tab)
+    let raw_mode = RawMode::enable()?;
     let mut input = String::new();
     let mut stdin = io::stdin();
 
@@ -13,9 +16,20 @@ pub fn read_line_with_completion(autocomplete: &AutoCompletion) -> Result<String
         let ch = buffer[0] as char;
 
         match ch {
-            '\n' => {
+            '\n' | '\r' => {
                 println!();
-                break;
+                // Explicitly drop raw mode before returning to ensure terminal is restored
+                drop(raw_mode);
+                return Ok(input);
+            }
+            // Backspace/Delete
+            '\u{7f}' | '\u{0008}' => {
+                if !input.is_empty() {
+                    input.pop();
+                    // Move cursor back, erase char, move back again
+                    print!("\x08 \x08");
+                    io::stdout().flush()?;
+                }
             }
             '\t' => {
                 let words: Vec<&str> = input.split_whitespace().collect();
@@ -48,8 +62,7 @@ pub fn read_line_with_completion(autocomplete: &AutoCompletion) -> Result<String
                                 for match_str in matches {
                                     print!("{}  ", match_str);
                                 }
-                                println!();
-                                print!("$ {}", input);
+                                print!("\n\r$ {}", input);
                                 io::stdout().flush()?;
                             }
                         } else {
@@ -59,7 +72,7 @@ pub fn read_line_with_completion(autocomplete: &AutoCompletion) -> Result<String
                                 print!("{}  ", match_str);
                             }
                             println!();
-                            print!("$ {}", input);
+                            print!("\r$ {}", input);
                             io::stdout().flush()?;
                         }
                     }
@@ -72,6 +85,36 @@ pub fn read_line_with_completion(autocomplete: &AutoCompletion) -> Result<String
             }
         }
     }
+}
 
-    Ok(input)
+struct RawMode {
+    original: Termios,
+}
+
+impl RawMode {
+    fn enable() -> Result<Self, anyhow::Error> {
+        let fd = 0; // stdin
+        let original = Termios::from_fd(fd)?;
+        let mut raw = original.clone();
+
+        // Disable canonical mode, echo, signals, and special chars
+        raw.c_lflag &= !(ICANON | ECHO | IEXTEN | ISIG);
+        // Disable output processing
+        raw.c_oflag &= !OPOST;
+        // Disable CR-to-NL translation and XON/XOFF
+        raw.c_iflag &= !(ICRNL | IXON);
+        // Ensure reads return as soon as 1 byte is available
+        raw.c_cc[VMIN] = 1;
+        raw.c_cc[VTIME] = 0;
+
+        tcsetattr(fd, TCSANOW, &raw)?;
+        Ok(Self { original })
+    }
+}
+
+impl Drop for RawMode {
+    fn drop(&mut self) {
+        let fd = 0; // stdin
+        let _ = tcsetattr(fd, TCSANOW, &self.original);
+    }
 }

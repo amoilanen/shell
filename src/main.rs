@@ -46,7 +46,7 @@ fn main() -> Result<(), anyhow::Error> {
     let autocomplete = AutoCompletion::new(vec!["echo", "cd", "pwd", "exit", "type"]);
 
     loop {
-        print!("$ ");
+        print!("\r$ ");
         io::stdout().flush()?;
         let input = read_line_with_completion(&autocomplete)?;
         let parsed_command = ParsedCommand::parse_command(&input)?;
@@ -60,7 +60,7 @@ fn main() -> Result<(), anyhow::Error> {
                 };
                 execute(|| command.run(&parsed_command));
             } else {
-                println!("{}: command not found", command.trim());
+                println!("\r{}: command not found", command.trim());
             }
         }
     }
