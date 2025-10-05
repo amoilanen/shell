@@ -86,8 +86,9 @@ fn process_completion_matches(
 fn handle_single_completion(input: &mut String, last_word: &str, completion: &str) -> Result<(), anyhow::Error> {
     if completion.len() > last_word.len() {
         let to_add = &completion[last_word.len()..];
-        print_and_flush(to_add)?;
-        input.push_str(to_add);
+        let to_add_padded = format!("{} ", to_add);
+        print_and_flush(&to_add_padded)?;
+        input.push_str(&to_add_padded);
     }
     Ok(())
 }
@@ -170,7 +171,7 @@ mod tests {
         // This would normally print to stdout, but we'll test the logic
         let result = handle_single_completion(&mut input, "ec", completion);
         assert!(result.is_ok());
-        assert_eq!(input, "echo");
+        assert_eq!(input, "echo ");
     }
 
     #[test]
@@ -202,7 +203,7 @@ mod tests {
 
         let result = process_completion_matches(&mut input, "ec", matches, &autocomplete);
         assert!(result.is_ok());
-        assert_eq!(input, "echo");
+        assert_eq!(input, "echo ");
     }
 
     #[test]
@@ -250,7 +251,7 @@ mod tests {
 
         let result = handle_tab_completion(&mut input, &autocomplete);
         assert!(result.is_ok());
-        assert_eq!(input, "echo"); // Should complete to "echo"
+        assert_eq!(input, "echo "); // Should complete to "echo"
     }
 
     #[test]
@@ -260,7 +261,7 @@ mod tests {
 
         let result = handle_tab_completion(&mut input, &autocomplete);
         assert!(result.is_ok());
-        assert_eq!(input, "echo hello echo"); // Should complete the last word
+        assert_eq!(input, "echo hello echo "); // Should complete the last word
     }
 
     #[test]
