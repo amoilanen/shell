@@ -15,6 +15,7 @@ const TAB: char = '\t';
 const BACKSPACE: char = '\u{7f}';
 const DELETE: char = '\u{0008}';
 const BEEP: char = '\x07';
+const CTRL_C: char = '\u{0003}';
 
 pub fn read_line_with_completion(autocomplete: &AutoCompletion) -> Result<String, anyhow::Error> {
     let raw_mode = RawMode::enable()?;
@@ -32,6 +33,12 @@ pub fn read_line_with_completion(autocomplete: &AutoCompletion) -> Result<String
                 // Explicitly drop raw mode before returning to ensure terminal is restored
                 drop(raw_mode);
                 return Ok(input);
+            }
+            CTRL_C => {
+                println!("^C");
+                // Explicitly drop raw mode before exiting to ensure terminal is restored
+                drop(raw_mode);
+                std::process::exit(0);
             }
             BACKSPACE | DELETE => {
                 handle_backspace(&mut input)?;
@@ -275,6 +282,7 @@ mod tests {
         assert_eq!(TAB, '\t');
         assert_eq!(BACKSPACE, '\u{7f}');
         assert_eq!(DELETE, '\u{0008}');
+        assert_eq!(CTRL_C, '\u{0003}');
     }
 
     #[test]
