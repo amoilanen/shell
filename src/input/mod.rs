@@ -14,6 +14,7 @@ const CARRIAGE_RETURN: char = '\r';
 const TAB: char = '\t';
 const BACKSPACE: char = '\u{7f}';
 const DELETE: char = '\u{0008}';
+const BEEP: char = '\x07';
 
 pub fn read_line_with_completion(autocomplete: &AutoCompletion) -> Result<String, anyhow::Error> {
     let raw_mode = RawMode::enable()?;
@@ -76,7 +77,9 @@ fn process_completion_matches(
     autocomplete: &AutoCompletion,
 ) -> Result<(), anyhow::Error> {
     match matches.len() {
-        0 => {},
+        0 => {
+            print_and_flush(format!("{}", BEEP).as_str())?;
+        },
         1 => handle_single_completion(input, last_word, &matches[0])?,
         _ => handle_multiple_completions(input, last_word, matches, autocomplete)?,
     }
@@ -116,7 +119,7 @@ fn handle_multiple_completions(
 fn display_matches_and_reprompt(input: &str, matches: &[String]) -> Result<(), anyhow::Error> {
     println!();
     for match_str in matches {
-        print!("{}  ", match_str);
+        print!("{} ", match_str);
     }
     print!("\n\r{}{}", PROMPT, input);
     io::stdout().flush()?;
@@ -168,7 +171,6 @@ mod tests {
         let mut input = String::from("ec");
         let completion = "echo";
 
-        // This would normally print to stdout, but we'll test the logic
         let result = handle_single_completion(&mut input, "ec", completion);
         assert!(result.is_ok());
         assert_eq!(input, "echo ");
