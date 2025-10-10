@@ -2,12 +2,23 @@ use std::collections::HashSet;
 
 pub struct AutoCompletion {
     candidates: HashSet<String>,
+    dynamic_completion: Box<dyn Fn(&str) -> Vec<String>>,
 }
 
 impl AutoCompletion {
+
+    #[cfg(test)]
     pub fn new(candidates: Vec<&str>) -> Self {
+        Self::new_with_dynamic_completion(candidates, Box::new(|_| Vec::new()))
+    }
+
+    pub fn new_with_dynamic_completion(
+        candidates: Vec<&str>,
+        dynamic_completion: Box<dyn Fn(&str) -> Vec<String>>,
+    ) -> Self {
         Self {
             candidates: candidates.into_iter().map(|s| s.to_string()).collect(),
+            dynamic_completion
         }
     }
 
@@ -16,12 +27,21 @@ impl AutoCompletion {
             return Vec::new();
         }
 
+        let mut seen = HashSet::new();
         let mut matches: Vec<String> = self
             .candidates
             .iter()
             .filter(|candidate| candidate.starts_with(partial))
+            .filter(|candidate| seen.insert((*candidate).clone()))
             .cloned()
             .collect();
+
+        let dynamic_matches = (self.dynamic_completion)(partial);
+        for m in dynamic_matches {
+            if seen.insert(m.clone()) {
+                matches.push(m);
+            }
+        }
 
         matches.sort();
         matches
@@ -92,5 +112,98 @@ mod tests {
         assert_eq!(autocomplete.find_common_prefix("ec"), Some("echo".to_string()));
         assert_eq!(autocomplete.find_common_prefix("ex"), Some("ex".to_string()));
         assert_eq!(autocomplete.find_common_prefix("xyz"), None);
+    }
+
+    #[test]
+    fn test_dynamic_completion_no_matches() {
+        let autocomplete = AutoCompletion::new_with_dynamic_completion(
+            vec!["echo", "exit"],
+            Box::new(|partial: &str| -> Vec<String> {
+                if partial == "xyz" {
+                    vec![]
+                } else {
+                    vec!["dynamic1".to_string(), "dynamic2".to_string()]
+                }
+            })
+        );
+
+        assert_eq!(autocomplete.complete("xyz"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_dynamic_completion_with_matches() {
+        let autocomplete = AutoCompletion::new_with_dynamic_completion(
+            vec!["echo", "exit"],
+            Box::new(|partial: &str| -> Vec<String> {
+                if partial == "d" {
+                    vec!["docker".to_string(), "dotnet".to_string()]
+                } else {
+                    vec![]
+                }
+            })
+        );
+
+        let result = autocomplete.complete("d");
+        assert_eq!(result, vec!["docker", "dotnet"]);
+    }
+
+    #[test]
+    fn test_dynamic_completion_combined_with_static() {
+        let autocomplete = AutoCompletion::new_with_dynamic_completion(
+            vec!["echo", "exit"],
+            Box::new(|partial: &str| -> Vec<String> {
+                if partial == "e" {
+                    vec!["env".to_string(), "emacs".to_string()]
+                } else {
+                    vec![]
+                }
+            })
+        );
+
+        let result = autocomplete.complete("e");
+        assert_eq!(result, vec!["echo", "emacs", "env", "exit"]);
+    }
+
+    #[test]
+    fn test_dynamic_completion_deduplication() {
+        let autocomplete = AutoCompletion::new_with_dynamic_completion(
+            vec!["echo", "exit"],
+            Box::new(|partial: &str| -> Vec<String> {
+                if partial == "e" {
+                    vec!["echo".to_string(), "env".to_string()]
+                } else {
+                    vec![]
+                }
+            })
+        );
+
+        let result = autocomplete.complete("e");
+        assert_eq!(result, vec!["echo", "env", "exit"]);
+    }
+
+    #[test]
+    fn test_find_common_prefix_with_dynamic_completion() {
+        let autocomplete = AutoCompletion::new_with_dynamic_completion(
+            vec!["echo", "exit", "export"],
+            Box::new(|partial: &str| -> Vec<String> {
+                if partial == "ex" {
+                    vec!["expr".to_string()]
+                } else {
+                    vec![]
+                }
+            })
+        );
+        assert_eq!(autocomplete.find_common_prefix("ex"), Some("ex".to_string()));
+    }
+
+    #[test]
+    fn test_dynamic_completion_empty_partial() {
+        let autocomplete = AutoCompletion::new_with_dynamic_completion(
+            vec!["echo"],
+            Box::new(|_partial: &str| -> Vec<String> {
+                vec!["should_not_appear".to_string()]
+            })
+        );
+        assert_eq!(autocomplete.complete(""), Vec::<String>::new());
     }
 }

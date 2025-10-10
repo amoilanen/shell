@@ -43,7 +43,11 @@ fn main() -> Result<(), anyhow::Error> {
         })
     ].into_iter().collect();
 
-    let autocomplete = AutoCompletion::new(vec!["echo", "cd", "pwd", "exit", "type"]);
+    let path_clone = path.clone();
+    let autocomplete = AutoCompletion::new_with_dynamic_completion(
+        vec!["echo", "cd", "pwd", "exit", "type"],
+        Box::new(move |partial: &str| path_clone.find_matching_executables(partial))
+    );
 
     loop {
         print!("\r$ ");
