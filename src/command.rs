@@ -9,7 +9,7 @@ pub(crate) enum ShellCommand {
     Exit,
     Pwd,
     Type { path: path::Path, builtin_commands: Vec<String> },
-    Exec { executable: String }
+    Exec
 }
 
 impl ShellCommand {
@@ -19,7 +19,7 @@ impl ShellCommand {
         match self {
             ShellCommand::Cd => builtin::cd::run(args.as_slice()),
             ShellCommand::Echo => builtin::echo::run(args.as_slice(), parsed_command),
-            ShellCommand::Exec { executable } => exec::run(executable, parsed_command),
+            ShellCommand::Exec => exec::run(parsed_command),
             ShellCommand::Exit => builtin::exit::run(args.as_slice()),
             ShellCommand::Pwd => builtin::pwd::run(args.as_slice()),
             ShellCommand::Type { path, builtin_commands } =>

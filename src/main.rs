@@ -71,10 +71,8 @@ fn main() -> Result<(), anyhow::Error> {
             let command = &parsed_command.command;
             if let Some(builtin_command) = builtin_commands.get(command.as_str()) {
                 execute(|| builtin_command.run(&parsed_command));
-            } else if let Some(found_executable) = path.find_command(command.as_str()) {
-                let command = command::ShellCommand::Exec {
-                    executable: found_executable
-                };
+            } else if let Some(_found_executable) = path.find_command(command.as_str()) {
+                let command = command::ShellCommand::Exec;
                 execute(|| command.run(&parsed_command));
             } else {
                 println!("\r{}: command not found", command.trim());

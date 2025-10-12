@@ -10,19 +10,19 @@ struct ExecutableInfo {
     pub directory: String,
 }
 
-pub(crate) fn run(executable: &str, parsed_command: &ParsedCommand) -> Result<(), anyhow::Error> {
+pub(crate) fn run(parsed_command: &ParsedCommand) -> Result<(), anyhow::Error> {
     if let Some(piped_cmd) = &parsed_command.piped_command {
         run_pipeline(parsed_command, piped_cmd)
     } else {
-        run_simple_command(executable, parsed_command)
+        run_simple_command(parsed_command)
     }
 }
 
-fn run_simple_command(executable: &str, parsed_command: &ParsedCommand) -> Result<(), anyhow::Error> {
-    let mut command = build_command_from_parsed(executable, &parsed_command.args);
+fn run_simple_command(parsed_command: &ParsedCommand) -> Result<(), anyhow::Error> {
+    let mut command = build_command_from_parsed(&parsed_command.command, &parsed_command.args);
     let output = command
         .output()
-        .map_err(|e| anyhow::anyhow!("Failed to execute process {}: {}", executable, e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to execute process {}: {}", parsed_command.command, e))?;
     write_command_output(parsed_command, &output.stdout, &output.stderr)
 }
 
@@ -297,7 +297,7 @@ mod tests {
             Some(stderr_path.clone())
         );
 
-        run("ls", &parsed_command)?;
+        run(&parsed_command)?;
 
         assert_file_contains_error_message(&stderr_path, "")?;
         cleanup_files(&[&stderr_path]);
@@ -316,7 +316,7 @@ mod tests {
             Some(stderr_path.clone())
         );
 
-        run("ls", &parsed_command)?;
+        run(&parsed_command)?;
 
         assert_file_contains_error_message(&stderr_path, "")?;
 
@@ -338,7 +338,7 @@ mod tests {
             Some(stderr_path.clone())
         );
 
-        run("echo", &parsed_command)?;
+        run(&parsed_command)?;
 
         assert_file_empty_or_missing(&stderr_path, "Stderr file should be empty when command produces no stderr")?;
         cleanup_files(&[&stderr_path]);
@@ -356,7 +356,7 @@ mod tests {
             None
         );
 
-        run("echo", &parsed_command)?;
+        run(&parsed_command)?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.contains("hello world"), "Stdout file should contain command output");
@@ -376,7 +376,7 @@ mod tests {
             None
         );
 
-        run("ls", &parsed_command)?;
+        run(&parsed_command)?;
 
         assert_file_empty_or_missing(&stdout_path, "Stdout file should be empty when command produces no stdout")?;
         cleanup_files(&[&stdout_path]);
@@ -402,7 +402,7 @@ mod tests {
             piped_command: None
         };
 
-        run("echo", &parsed_command)?;
+        run(&parsed_command)?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.contains("initial content\nappended content\n"), "File should contain all content");
@@ -430,7 +430,7 @@ mod tests {
             piped_command: None
         };
 
-        run("ls", &parsed_command)?;
+        run(&parsed_command)?;
 
         let content = read_file_content(&stderr_path)?;
         assert!(content.contains("initial error"), "File should contain initial content");
@@ -464,7 +464,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run("echo", &first_cmd)?;
+        run(&first_cmd)?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.contains("hello world"), "Pipeline output should contain 'hello world', got: {}", content);
@@ -477,7 +477,6 @@ mod tests {
     fn test_pipeline_with_grep() -> Result<(), anyhow::Error> {
         let stdout_path = create_temp_file_path("test_pipe_grep.txt");
 
-        // Create piped command: echo -e "foo\nbar\nbaz" | grep "ba"
         let second_cmd = ParsedCommand {
             command: "grep".to_string(),
             args: vec!["ba".to_string()],
@@ -497,7 +496,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run("echo", &first_cmd)?;
+        run(&first_cmd)?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.contains("bar"), "Pipeline should filter and contain 'bar', got: {}", content);
@@ -531,7 +530,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run("echo", &first_cmd)?;
+        run(&first_cmd)?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.contains("line1"), "Pipeline should contain line1");
@@ -545,7 +544,6 @@ mod tests {
     fn test_pipeline_with_wc() -> Result<(), anyhow::Error> {
         let stdout_path = create_temp_file_path("test_pipe_wc.txt");
 
-        // Create piped command: echo "hello world" | wc -w
         let second_cmd = ParsedCommand {
             command: "wc".to_string(),
             args: vec!["-w".to_string()],
@@ -565,7 +563,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run("echo", &first_cmd)?;
+        run(&first_cmd)?;
 
         let content = read_file_content(&stdout_path)?;
         let trimmed = content.trim();
@@ -580,7 +578,6 @@ mod tests {
         let stdout_path = create_temp_file_path("test_pipe_stderr_out.txt");
         let stderr_path = create_temp_file_path("test_pipe_stderr_err.txt");
 
-        // Create piped command: echo "test" | grep "nonexistent" (will output to stderr)
         let second_cmd = ParsedCommand {
             command: "grep".to_string(),
             args: vec!["nonexistent_pattern_xyz".to_string()],
@@ -603,10 +600,8 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run("echo", &first_cmd)?;
+        run(&first_cmd)?;
 
-        // When grep doesn't find a match, it just produces empty stdout and no stderr
-        // The stdout file should exist but be empty
         assert_file_empty_or_missing(&stdout_path, "Stdout should be empty when grep finds no matches")?;
 
         cleanup_files(&[&stdout_path, &stderr_path]);
@@ -616,11 +611,8 @@ mod tests {
     #[test]
     fn test_pipeline_append_mode() -> Result<(), anyhow::Error> {
         let stdout_path = create_temp_file_path("test_pipe_append.txt");
-
-        // Write initial content
         write_output_to_file(&stdout_path, "initial\n".as_bytes(), false)?;
 
-        // Create piped command: echo "appended" | cat >> file
         let second_cmd = ParsedCommand {
             command: "cat".to_string(),
             args: vec![],
@@ -640,7 +632,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run("echo", &first_cmd)?;
+        run(&first_cmd)?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.contains("initial"), "File should contain initial content");
