@@ -28,27 +28,29 @@ impl ShellCommand {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) struct Redirect {
     pub(crate) filename: String,
     pub(crate) should_append: bool
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) struct ParsedCommand {
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
     pub(crate) stdout_redirect: Option<Redirect>,
-    pub(crate) stderr_redirect: Option<Redirect>
+    pub(crate) stderr_redirect: Option<Redirect>,
+    pub(crate) piped_command: Option<Box<ParsedCommand>>
 }
 
 impl ParsedCommand {
 
     //TODO: Support also 1>&2 2>&1
-    fn parse_terms(input: &str, terms: &[String]) -> Result<Option<ParsedCommand>, anyhow::Error> {
-        if terms.len() == 0 {
+    fn parse_terms_no_pipes(input: &str, terms: &[String]) -> Result<Option<ParsedCommand>, anyhow::Error> {
+        if terms.is_empty() {
             return Err(anyhow::anyhow!("No command provided: {}", input));
         }
+
         let mut terms_without_redirect: Vec<String> = Vec::new();
         let mut idx = 0;
         let mut stdout_redirect: Option<Redirect> = None;
@@ -81,9 +83,29 @@ impl ParsedCommand {
         }
         if let Some(command) = terms_without_redirect.get(0) {
             let args = terms_without_redirect[1..].to_vec();
-            Ok(Some(ParsedCommand { command: command.clone(), args, stdout_redirect, stderr_redirect }))
+            Ok(Some(ParsedCommand { command: command.clone(), args, stdout_redirect, stderr_redirect, piped_command: None }))
         } else {
             Err(anyhow::anyhow!("No command provided: {}", input))
+        }
+    }
+
+    fn parse_terms_with_pipes(input: &str, terms: &[String]) -> Result<Option<ParsedCommand>, anyhow::Error> {
+        if let Some(pipe_pos) = terms.iter().position(|t| t == "|") {
+            let first_cmd_terms = &terms[..pipe_pos];
+            let second_cmd_terms = &terms[pipe_pos + 1..];
+
+            if first_cmd_terms.is_empty() || second_cmd_terms.is_empty() {
+                return Err(anyhow::anyhow!("Invalid pipe syntax: {}", input));
+            }
+            let mut first_cmd = ParsedCommand::parse_terms_with_pipes(input, first_cmd_terms)?
+                .ok_or_else(|| anyhow::anyhow!("Failed to parse first command in pipe"))?;
+            let second_cmd = ParsedCommand::parse_terms_with_pipes(input, second_cmd_terms)?
+                .ok_or_else(|| anyhow::anyhow!("Failed to parse second command in pipe"))?;
+
+            first_cmd.piped_command = Some(Box::new(second_cmd));
+            Ok(Some(first_cmd))
+        } else {
+            ParsedCommand::parse_terms_no_pipes(input, &terms)
         }
     }
 
@@ -92,8 +114,9 @@ impl ParsedCommand {
         if input.is_empty() {
             return Ok(None);
         }
-        let command_and_args = ParsedCommand::read_quoted(input)?;
-        ParsedCommand::parse_terms(input, &command_and_args)
+
+        let terms = ParsedCommand::read_quoted(input)?;
+        ParsedCommand::parse_terms_with_pipes(input, &terms)
     }
 
     fn read_quoted(input: &str) -> Result<Vec<String>, anyhow::Error> {
@@ -158,6 +181,13 @@ impl ParsedCommand {
                         current_part = String::new();
                     }
                     i += 1;
+                } else if ch == '|' {
+                    if current_part.len() > 0 {
+                        result.push(current_part.clone());
+                        current_part = String::new();
+                    }
+                    result.push("|".to_string());
+                    i += 1;
                 } else {
                     let redirect_patterns = ["2>>", "1>>", ">>", "2>", "1>", ">"];
                     let mut found_redirect = false;
@@ -165,7 +195,6 @@ impl ParsedCommand {
                     for pattern in redirect_patterns.iter() {
                         if i + pattern.len() <= chars.len() {
                             let potential_match: String = chars[i..i + pattern.len()].iter().collect();
-                            // Found a redirect operator
                             if potential_match == *pattern {
                                 if current_part.len() > 0 {
                                     result.push(current_part.clone());
@@ -220,7 +249,8 @@ mod tests {
             stderr_redirect: stderr_redirect.map(|(filename, should_append)| Redirect {
                 filename: filename.to_string(),
                 should_append
-            })
+            }),
+            piped_command: None
         }
     }
 
@@ -543,7 +573,8 @@ mod tests {
             command: "cat".to_string(),
             args: vec!["file.txt".to_string()],
             stdout_redirect: Some(Redirect { filename: "output.txt".to_string(), should_append: false }),
-            stderr_redirect: Some(Redirect { filename: "errors.log".to_string(), should_append: true })
+            stderr_redirect: Some(Redirect { filename: "errors.log".to_string(), should_append: true }),
+            piped_command: None
         };
         assert_eq!(result, Some(expected));
         Ok(())
@@ -598,7 +629,48 @@ mod tests {
             command: "cat".to_string(),
             args: vec!["file.txt".to_string()],
             stdout_redirect: Some(Redirect { filename: "output.txt".to_string(), should_append: false }),
-            stderr_redirect: Some(Redirect { filename: "errors.log".to_string(), should_append: true })
+            stderr_redirect: Some(Redirect { filename: "errors.log".to_string(), should_append: true }),
+            piped_command: None
+        };
+        assert_eq!(result, Some(expected));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_simple_pipe() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("cat /tmp/foo/file | wc")?;
+        let expected = ParsedCommand {
+            command: "cat".to_string(),
+            args: vec!["/tmp/foo/file".to_string()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(ParsedCommand {
+                command: "wc".to_string(),
+                args: vec![],
+                stdout_redirect: None,
+                stderr_redirect: None,
+                piped_command: None
+            }))
+        };
+        assert_eq!(result, Some(expected));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pipe_with_args() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("tail -f /tmp/foo/file-1 | head -n 5")?;
+        let expected = ParsedCommand {
+            command: "tail".to_string(),
+            args: vec!["-f".to_string(), "/tmp/foo/file-1".to_string()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(ParsedCommand {
+                command: "head".to_string(),
+                args: vec!["-n".to_string(), "5".to_string()],
+                stdout_redirect: None,
+                stderr_redirect: None,
+                piped_command: None
+            }))
         };
         assert_eq!(result, Some(expected));
         Ok(())

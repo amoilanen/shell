@@ -54,7 +54,20 @@ fn main() -> Result<(), anyhow::Error> {
         io::stdout().flush()?;
         let input = read_line_with_completion(&autocomplete)?;
         let parsed_command = ParsedCommand::parse_command(&input)?;
-        if let Some(parsed_command) = parsed_command {
+        if let Some(mut parsed_command) = parsed_command {
+            // Resolve piped command from PATH if present
+            if let Some(piped_cmd) = &parsed_command.piped_command {
+                if let Some(found_piped_executable) = path.find_command(&piped_cmd.command) {
+                    // Update the piped command with resolved path
+                    let mut updated_piped = (**piped_cmd).clone();
+                    updated_piped.command = found_piped_executable;
+                    parsed_command.piped_command = Some(Box::new(updated_piped));
+                } else {
+                    println!("\r{}: command not found", piped_cmd.command.trim());
+                    continue;
+                }
+            }
+
             let command = &parsed_command.command;
             if let Some(builtin_command) = builtin_commands.get(command.as_str()) {
                 execute(|| builtin_command.run(&parsed_command));
