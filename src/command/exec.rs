@@ -1,4 +1,4 @@
-use std::process::{Command, Stdio};
+use std::process::{Command, Stdio, Child, ChildStdout};
 use std::path::Path;
 use std::io::Write;
 use std::fs::OpenOptions;
@@ -27,23 +27,67 @@ fn run_simple_command(parsed_command: &ParsedCommand) -> Result<(), anyhow::Erro
 }
 
 fn run_pipeline(first_cmd: &ParsedCommand, second_cmd: &ParsedCommand) -> Result<(), anyhow::Error> {
-    let mut cmd1 = build_command_from_parsed(&first_cmd.command, &first_cmd.args);
-    cmd1.stdout(Stdio::piped());
-    let mut child1 = cmd1.spawn()
+    let (first_child, first_stdout) = spawn_first_pipeline_command(first_cmd)?;
+    let second_child = spawn_second_pipeline_command(second_cmd, first_stdout)?;
+    await_pipeline_completion(first_child, second_child, second_cmd)
+}
+
+fn spawn_first_pipeline_command(cmd: &ParsedCommand) -> Result<(Child, ChildStdout), anyhow::Error> {
+    let mut command = build_command_from_parsed(&cmd.command, &cmd.args);
+    command.stdout(Stdio::piped());
+
+    let mut child = command.spawn()
         .map_err(|e| anyhow::anyhow!("Failed to spawn first command: {}", e))?;
 
-    let child1_stdout = child1.stdout.take()
+    let stdout = child.stdout.take()
         .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout from first command"))?;
 
-    let mut cmd2 = build_command_from_parsed(&second_cmd.command, &second_cmd.args);
-    cmd2.stdin(Stdio::from(child1_stdout));
-    let output2 = cmd2.output()
-        .map_err(|e| anyhow::anyhow!("Failed to execute second command: {}", e))?;
+    Ok((child, stdout))
+}
 
-    child1.wait()
-        .map_err(|e| anyhow::anyhow!("Failed to wait for first command: {}", e))?;
+fn spawn_second_pipeline_command(cmd: &ParsedCommand, stdin: ChildStdout) -> Result<Child, anyhow::Error> {
+    let mut command = build_command_from_parsed(&cmd.command, &cmd.args);
+    command.stdin(Stdio::from(stdin));
 
-    write_command_output(second_cmd, &output2.stdout, &output2.stderr)
+    configure_command_stdio(&mut command, cmd.stdout_redirect.is_some(), cmd.stderr_redirect.is_some());
+
+    command.spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to spawn second command: {}", e))
+}
+
+fn configure_command_stdio(command: &mut Command, capture_stdout: bool, capture_stderr: bool) {
+    if capture_stdout {
+        command.stdout(Stdio::piped());
+    } else {
+        command.stdout(Stdio::inherit());
+    }
+
+    if capture_stderr {
+        command.stderr(Stdio::piped());
+    } else {
+        command.stderr(Stdio::inherit());
+    }
+}
+
+fn await_pipeline_completion(
+    mut first_child: Child,
+    mut second_child: Child,
+    second_cmd: &ParsedCommand
+) -> Result<(), anyhow::Error> {
+    let needs_output_capture = second_cmd.stdout_redirect.is_some() || second_cmd.stderr_redirect.is_some();
+
+    if needs_output_capture {
+        let output = second_child.wait_with_output()
+            .map_err(|e| anyhow::anyhow!("Failed to wait for second command: {}", e))?;
+        let _ = first_child.wait();
+        write_command_output(second_cmd, &output.stdout, &output.stderr)?;
+    } else {
+        second_child.wait()
+            .map_err(|e| anyhow::anyhow!("Failed to wait for second command: {}", e))?;
+        let _ = first_child.wait();
+    }
+
+    Ok(())
 }
 
 fn build_command_from_parsed(command_name: &str, args: &[String]) -> Command {
@@ -639,6 +683,43 @@ mod tests {
         assert!(content.contains("appended"), "File should contain appended content");
 
         cleanup_files(&[&stdout_path]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_pipeline_tail_with_head_limited_input() -> Result<(), anyhow::Error> {
+        let input_file = create_temp_file_path("test_tail_head_input.txt");
+        let stdout_path = create_temp_file_path("test_tail_head_output.txt");
+
+        write_output_to_file(&input_file, "1. banana strawberry\n2. apple pear\n3. orange mango\n".as_bytes(), false)?;
+
+        let second_cmd = ParsedCommand {
+            command: "head".to_string(),
+            args: vec!["-n".to_string(), "5".to_string()],
+            stdout_redirect: Some(crate::command::Redirect {
+                filename: stdout_path.clone(),
+                should_append: false
+            }),
+            stderr_redirect: None,
+            piped_command: None
+        };
+
+        let first_cmd = ParsedCommand {
+            command: "tail".to_string(),
+            args: vec![input_file.clone()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(second_cmd))
+        };
+
+        run(&first_cmd)?;
+
+        let content = read_file_content(&stdout_path)?;
+        assert!(content.contains("1. banana strawberry"), "Output should contain first line, got: {}", content);
+        assert!(content.contains("2. apple pear"), "Output should contain second line, got: {}", content);
+        assert!(content.contains("3. orange mango"), "Output should contain third line, got: {}", content);
+
+        cleanup_files(&[&input_file, &stdout_path]);
         Ok(())
     }
 }
