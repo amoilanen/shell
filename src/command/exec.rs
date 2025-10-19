@@ -1,8 +1,10 @@
-use std::process::{Command, Stdio, Child, ChildStdout};
+use std::process::{Command, Stdio};
 use std::path::Path;
 use std::io::Write;
+use std::process::Output;
 use std::fs::OpenOptions;
 use crate::command::ParsedCommand;
+
 
 #[derive(Debug, PartialEq)]
 struct ExecutableInfo {
@@ -11,81 +13,66 @@ struct ExecutableInfo {
 }
 
 pub(crate) fn run(parsed_command: &ParsedCommand) -> Result<(), anyhow::Error> {
-    if let Some(piped_cmd) = &parsed_command.piped_command {
-        run_pipeline(parsed_command, piped_cmd)
-    } else {
-        run_simple_command(parsed_command)
+    let commands = get_pipeline_commands(parsed_command);
+    run_pipeline(&commands)?;
+    Ok(())
+}
+
+fn get_pipeline_commands(command: &ParsedCommand) -> Vec<ParsedCommand> {
+    let mut commands: Vec<ParsedCommand> = vec![command.clone()];
+    let mut current_command: ParsedCommand = command.clone();
+    while let Some(next_command) = current_command.piped_command.clone() {
+        current_command = *next_command.clone();
+        commands.push(*next_command);
     }
+    commands
 }
 
-fn run_simple_command(parsed_command: &ParsedCommand) -> Result<(), anyhow::Error> {
-    let mut command = build_command_from_parsed(&parsed_command.command, &parsed_command.args);
-    let output = command
-        .output()
-        .map_err(|e| anyhow::anyhow!("Failed to execute process {}: {}", parsed_command.command, e))?;
-    write_command_output(parsed_command, &output.stdout, &output.stderr)
-}
-
-fn run_pipeline(first_cmd: &ParsedCommand, second_cmd: &ParsedCommand) -> Result<(), anyhow::Error> {
-    let (first_child, first_stdout) = spawn_first_pipeline_command(first_cmd)?;
-    let second_child = spawn_second_pipeline_command(second_cmd, first_stdout)?;
-    await_pipeline_completion(first_child, second_child, second_cmd)
-}
-
-fn spawn_first_pipeline_command(cmd: &ParsedCommand) -> Result<(Child, ChildStdout), anyhow::Error> {
-    let mut command = build_command_from_parsed(&cmd.command, &cmd.args);
-    command.stdout(Stdio::piped());
-
-    let mut child = command.spawn()
-        .map_err(|e| anyhow::anyhow!("Failed to spawn first command: {}", e))?;
-
-    let stdout = child.stdout.take()
-        .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout from first command"))?;
-
-    Ok((child, stdout))
-}
-
-fn spawn_second_pipeline_command(cmd: &ParsedCommand, stdin: ChildStdout) -> Result<Child, anyhow::Error> {
-    let mut command = build_command_from_parsed(&cmd.command, &cmd.args);
-    command.stdin(Stdio::from(stdin));
-
-    configure_command_stdio(&mut command, cmd.stdout_redirect.is_some(), cmd.stderr_redirect.is_some());
-
-    command.spawn()
-        .map_err(|e| anyhow::anyhow!("Failed to spawn second command: {}", e))
-}
-
-fn configure_command_stdio(command: &mut Command, capture_stdout: bool, capture_stderr: bool) {
-    if capture_stdout {
-        command.stdout(Stdio::piped());
-    } else {
-        command.stdout(Stdio::inherit());
+fn run_pipeline(commands: &[ParsedCommand]) -> Result<(), anyhow::Error> {
+    if commands.is_empty() {
+        return Ok(());
     }
 
-    if capture_stderr {
-        command.stderr(Stdio::piped());
-    } else {
-        command.stderr(Stdio::inherit());
-    }
-}
+    let mut previous = None;
+    let mut children = Vec::new();
 
-fn await_pipeline_completion(
-    mut first_child: Child,
-    mut second_child: Child,
-    second_cmd: &ParsedCommand
-) -> Result<(), anyhow::Error> {
-    let needs_output_capture = second_cmd.stdout_redirect.is_some() || second_cmd.stderr_redirect.is_some();
+    for (i, cmd) in commands.iter().enumerate() {
+        let is_last_command = i >= commands.len() - 1;
+        let mut command = build_command_from_parsed(&cmd.command, &cmd.args);
 
-    if needs_output_capture {
-        let output = second_child.wait_with_output()
-            .map_err(|e| anyhow::anyhow!("Failed to wait for second command: {}", e))?;
-        let _ = first_child.wait();
-        write_command_output(second_cmd, &output.stdout, &output.stderr)?;
-    } else {
-        second_child.wait()
-            .map_err(|e| anyhow::anyhow!("Failed to wait for second command: {}", e))?;
-        let _ = first_child.wait();
+        if let Some(output) = previous.take() {
+            command.stdin(output);
+        }
+
+        if !is_last_command {
+            command.stdout(Stdio::piped());
+        }
+
+        let mut child = command.spawn()?;
+
+        // Save this child’s stdout to connect to the next command’s stdin
+        if !is_last_command {
+            let stdout = child
+                .stdout
+                .take()
+                .expect("Failed to capture stdout of intermediate command");
+            previous = Some(Stdio::from(stdout));
+        }
+
+        children.push(child);
     }
+
+    // Wait for the last command and capture its stdout
+    let last_child = children.pop().unwrap();
+    let output = last_child.wait_with_output()?;
+
+    // Ensure all intermediate children are reaped
+    for mut c in children {
+        let _ = c.wait();
+    }
+    let last_command = &commands[commands.len() - 1];
+
+    write_command_output(last_command, &output)?;
 
     Ok(())
 }
@@ -95,7 +82,9 @@ fn build_command_from_parsed(command_name: &str, args: &[String]) -> Command {
     build_command(&exec_info, args.iter().map(|a| a.as_str()).collect::<Vec<&str>>().as_slice())
 }
 
-fn write_command_output(parsed_command: &ParsedCommand, stdout: &[u8], stderr: &[u8]) -> Result<(), anyhow::Error> {
+fn write_command_output(parsed_command: &ParsedCommand, output: &Output) -> Result<(), anyhow::Error> {
+    let stdout = &output.stdout;
+    let stderr = &output.stderr;
     write_output(&parsed_command.stdout_redirect.as_ref().map(|r| (r.filename.as_str(), r.should_append)), stdout)?;
     write_output(&parsed_command.stderr_redirect.as_ref().map(|r| (r.filename.as_str(), r.should_append)), stderr)?;
     Ok(())
