@@ -675,4 +675,30 @@ mod tests {
         assert_eq!(result, Some(expected));
         Ok(())
     }
+
+    #[test]
+    fn test_parse_pipe_multiple_commands() -> Result<(), anyhow::Error> {
+        let result = ParsedCommand::parse_command("cat ./Cargo.toml | head -n 5 | wc")?;
+        let expected = ParsedCommand {
+            command: "cat".to_string(),
+            args: vec!["./Cargo.toml".to_string()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(ParsedCommand {
+                command: "head".to_string(),
+                args: vec!["-n".to_string(), "5".to_string()],
+                stdout_redirect: None,
+                stderr_redirect: None,
+                piped_command: Some(Box::new(ParsedCommand {
+                    command: "wc".to_string(),
+                    args: vec![],
+                    stdout_redirect: None,
+                    stderr_redirect: None,
+                    piped_command: None
+                }))
+            }))
+        };
+        assert_eq!(result, Some(expected));
+        Ok(())
+    }
 }
