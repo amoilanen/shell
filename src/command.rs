@@ -1,5 +1,3 @@
-use crate::path;
-
 pub mod builtin;
 pub mod exec;
 
@@ -8,7 +6,7 @@ pub(crate) enum ShellCommand {
     Echo,
     Exit,
     Pwd,
-    Type { path: path::Path, builtin_commands: Vec<String> },
+    Type,
     Exec
 }
 
@@ -22,8 +20,7 @@ impl ShellCommand {
             ShellCommand::Exec => exec::run(parsed_command),
             ShellCommand::Exit => builtin::exit::run(args.as_slice()),
             ShellCommand::Pwd => builtin::pwd::run(args.as_slice()),
-            ShellCommand::Type { path, builtin_commands } =>
-                builtin::type_::run(args.as_slice(), path, builtin_commands.iter().map(|c| c.as_str()).collect::<Vec<&str>>() .as_slice()),
+            ShellCommand::Type => builtin::type_::run(args.as_slice()),
         }
     }
 }

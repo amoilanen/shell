@@ -31,22 +31,19 @@ where
 
 
 fn main() -> Result<(), anyhow::Error> {
-    let path = path::Path::parse(&env::var("PATH")?)?;
     let builtin_commands: HashMap<&str, ShellCommand> = [
         ("echo", command::ShellCommand::Echo {}),
         ("cd", command::ShellCommand::Cd {}),
         ("pwd", command::ShellCommand::Pwd {}),
         ("exit", command::ShellCommand::Exit {}),
-        ("type", command::ShellCommand::Type {
-            path: path.clone(),
-            builtin_commands: vec!["echo", "cd", "pwd", "exit", "type"].into_iter().map(|c| c.to_string()).collect()
-        })
+        ("type", command::ShellCommand::Type {})
     ].into_iter().collect();
 
-    let path_clone = path.clone();
+    let path = path::Path::parse(&env::var("PATH")?)?;
+    let automcomplete_path = path.clone();
     let autocomplete = AutoCompletion::new_with_dynamic_completion(
         vec!["echo", "cd", "pwd", "exit", "type"],
-        Box::new(move |partial: &str| path_clone.find_matching_executables(partial))
+        Box::new(move |partial: &str| automcomplete_path.find_matching_executables(partial))
     );
 
     loop {

@@ -2,29 +2,31 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use crate::command::ParsedCommand;
 
+pub(crate) fn generate_output(args: &[&str]) -> Result<Vec<u8>, anyhow::Error> {
+    Ok(format!("{}\n", args.join(" ")).into_bytes())
+}
+
 pub(crate) fn run(args: &[&str], parsed_command: &ParsedCommand) -> Result<(), anyhow::Error> {
-    let to_output = format!("{}\n", args.join(" "));
+    let to_output = generate_output(args)?;
     if let Some(stdout_redirect) = &parsed_command.stdout_redirect {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(stdout_redirect.should_append)
-            .open(&stdout_redirect.filename)
-            .map_err(|e| anyhow::anyhow!("Failed to open file '{}': {}", stdout_redirect.filename, e))?;
-        file.write_all(to_output.as_bytes())
-            .map_err(|e| anyhow::anyhow!("Failed to write to file '{}': {}", stdout_redirect.filename, e))?;
+        write_to_file(&stdout_redirect.filename, &to_output, stdout_redirect.should_append)?;
     } else {
-        print!("\r{}", to_output);
+        print!("\r{}", String::from_utf8_lossy(&to_output));
     }
     if let Some(stderr_redirect) = &parsed_command.stderr_redirect {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(stderr_redirect.should_append)
-            .open(&stderr_redirect.filename)
-            .map_err(|e| anyhow::anyhow!("Failed to open stderr file '{}': {}", stderr_redirect.filename, e))?;
-        file.write_all(b"")
-            .map_err(|e| anyhow::anyhow!("Failed to write to stderr file '{}': {}", stderr_redirect.filename, e))?;
+        write_to_file(&stderr_redirect.filename, b"", stderr_redirect.should_append)?;
     }
+    Ok(())
+}
+
+fn write_to_file(filename: &str, content: &[u8], should_append: bool) -> Result<(), anyhow::Error> {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(should_append)
+        .open(filename)
+        .map_err(|e| anyhow::anyhow!("Failed to open stderr file '{}': {}", filename, e))?;
+    file.write_all(content)
+        .map_err(|e| anyhow::anyhow!("Failed to write to stderr file '{}': {}", filename, e))?;
     Ok(())
 }
