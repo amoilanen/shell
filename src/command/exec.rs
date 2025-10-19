@@ -46,6 +46,10 @@ fn run_pipeline(commands: &[ParsedCommand]) -> Result<(), anyhow::Error> {
 
         if !is_last_command {
             command.stdout(Stdio::piped());
+        } else {
+            // For the last command, pipe stdout and stderr so they can be captured
+            command.stdout(Stdio::piped());
+            command.stderr(Stdio::piped());
         }
 
         let mut child = command.spawn()?;
