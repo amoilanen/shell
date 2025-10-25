@@ -93,22 +93,17 @@ fn run_pipeline(commands: &[ParsedCommand]) -> Result<(), anyhow::Error> {
     if !children.is_empty() {
         let last_command = &commands[commands.len() - 1];
         let is_last_builtin = builtin::is_builtin(&last_command.command);
+        let mut last_non_builtin_child_output: Option<Output> = None;
 
         if !is_last_builtin {
-            // Last command was external, write its output
             let last_child = children.pop().unwrap();
-            let output = last_child.wait_with_output()?;
-
-            for mut c in children {
-                let _ = c.wait();
-            }
-
+            last_non_builtin_child_output = Some(last_child.wait_with_output()?);
+        }
+        for mut c in children {
+            let _ = c.wait();
+        }
+        if let Some(output) = last_non_builtin_child_output {
             write_command_output(last_command, &output)?;
-        } else {
-            // Last command was builtin (already wrote output), just wait for external commands
-            for mut c in children {
-                let _ = c.wait();
-            }
         }
     }
 
@@ -153,7 +148,6 @@ fn parse_executable_path(executable: &str) -> ExecutableInfo {
 fn build_command(exec_info: &ExecutableInfo, args: &[&str]) -> Command {
     let mut command = Command::new(&exec_info.name);
     command.args(args);
-    command.current_dir(&exec_info.directory);
     command
 }
 
@@ -312,7 +306,7 @@ mod tests {
         let command = build_command(&exec_info, &["--help"]);
 
         let debug_str = format!("{:?}", command);
-        assert_eq!(debug_str, "cd \".\" && \"ls\" \"--help\"");
+        assert_eq!(debug_str, "\"ls\" \"--help\"");
     }
 
     #[test]
@@ -322,9 +316,10 @@ mod tests {
             directory: "/bin".to_string(),
         };
         let command = build_command(&exec_info, &["-la"]);
-        
+
         let debug_str = format!("{:?}", command);
-        assert_eq!(debug_str, "cd \"/bin\" && \"ls\" \"-la\"");
+        // Directory is no longer set, so no "cd" prefix
+        assert_eq!(debug_str, "\"ls\" \"-la\"");
     }
 
     #[test]
@@ -334,9 +329,9 @@ mod tests {
             directory: ".".to_string(),
         };
         let command = build_command(&exec_info, &["-r", "pattern", "."]);
-        
+
         let debug_str = format!("{:?}", command);
-        assert_eq!(debug_str, "cd \".\" && \"grep\" \"-r\" \"pattern\" \".\"");
+        assert_eq!(debug_str, "\"grep\" \"-r\" \"pattern\" \".\"");
     }
 
     #[test]
@@ -346,24 +341,24 @@ mod tests {
             directory: ".".to_string(),
         };
         let command = build_command(&exec_info, &[]);
-        
+
         let debug_str = format!("{:?}", command);
-        assert_eq!(debug_str, ("cd \".\" && \"pwd\""));
+        assert_eq!(debug_str, "\"pwd\"");
     }
 
     #[test]
     fn test_parse_and_build_workflow() {
         let executable = "/bin/ls";
         let args = &["-la", "/tmp"];
-        
+
         let exec_info = parse_executable_path(executable);
         let command = build_command(&exec_info, args);
-        
+
         assert_eq!(exec_info.name, "ls");
         assert_eq!(exec_info.directory, ".");
-        
+
         let debug_str = format!("{:?}", command);
-        assert_eq!(debug_str, "cd \".\" && \"ls\" \"-la\" \"/tmp\"");
+        assert_eq!(debug_str, "\"ls\" \"-la\" \"/tmp\"");
     }
 
     #[test]
@@ -858,6 +853,41 @@ mod tests {
             "Output should only contain builtin echo output, not cat output. Got: {}", content);
         assert!(!content.contains("file content"),
             "Output should NOT contain the external command output when last command is builtin");
+
+        cleanup_files(&[&input_file, &stdout_path]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_external_cat_to_builtin_echo() -> Result<(), anyhow::Error> {
+        let input_file = create_temp_file_path("test_cat_echo_input.txt");
+        let stdout_path = create_temp_file_path("test_cat_echo_output.txt");
+
+        write_output_to_file(&input_file, "data from file\n".as_bytes(), false)?;
+
+        let second_cmd = ParsedCommand {
+            command: "echo".to_string(),
+            args: vec!["done".to_string()],
+            stdout_redirect: Some(crate::command::Redirect {
+                filename: stdout_path.clone(),
+                should_append: false
+            }),
+            stderr_redirect: None,
+            piped_command: None
+        };
+
+        let first_cmd = ParsedCommand {
+            command: "cat".to_string(),
+            args: vec![input_file.clone()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(second_cmd))
+        };
+
+        run(&first_cmd)?;
+
+        let content = read_file_content(&stdout_path)?;
+        assert_eq!(content.trim(), "done", "Should output 'done' from echo builtin, got: {}", content);
 
         cleanup_files(&[&input_file, &stdout_path]);
         Ok(())
