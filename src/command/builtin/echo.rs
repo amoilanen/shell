@@ -1,5 +1,5 @@
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{self, Write};
 use crate::command::ParsedCommand;
 
 pub(crate) fn generate_output(args: &[&str]) -> Result<Vec<u8>, anyhow::Error> {
@@ -11,7 +11,8 @@ pub(crate) fn run(args: &[&str], parsed_command: &ParsedCommand) -> Result<(), a
     if let Some(stdout_redirect) = &parsed_command.stdout_redirect {
         write_to_file(&stdout_redirect.filename, &to_output, stdout_redirect.should_append)?;
     } else {
-        print!("\r{}", String::from_utf8_lossy(&to_output));
+        print!("{}", String::from_utf8_lossy(&to_output));
+        io::stdout().flush()?;
     }
     if let Some(stderr_redirect) = &parsed_command.stderr_redirect {
         write_to_file(&stderr_redirect.filename, b"", stderr_redirect.should_append)?;

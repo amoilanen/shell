@@ -1,4 +1,5 @@
 use std::env;
+use std::io::{self, Write};
 
 pub(crate) fn generate_output() -> Result<Vec<u8>, anyhow::Error> {
     let current_directory = env::current_dir()
@@ -10,6 +11,7 @@ pub(crate) fn generate_output() -> Result<Vec<u8>, anyhow::Error> {
 
 pub(crate) fn run(_: &[&str]) -> Result<(), anyhow::Error> {
     let output = generate_output()?;
-    print!("\r{}", String::from_utf8_lossy(&output));
+    print!("{}", String::from_utf8_lossy(&output));
+    io::stdout().flush()?;
     Ok(())
 }
