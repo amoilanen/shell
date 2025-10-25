@@ -52,21 +52,16 @@ fn main() -> Result<(), anyhow::Error> {
         let input = read_line_with_completion(&autocomplete)?;
         let parsed_command = ParsedCommand::parse_command(&input)?;
         if let Some(mut parsed_command) = parsed_command {
-            // Resolve piped command from PATH if present
-            if let Some(piped_cmd) = &parsed_command.piped_command {
-                if let Some(found_piped_executable) = path.find_command(&piped_cmd.command) {
-                    // Update the piped command with resolved path
-                    let mut updated_piped = (**piped_cmd).clone();
-                    updated_piped.command = found_piped_executable;
-                    parsed_command.piped_command = Some(Box::new(updated_piped));
-                } else {
-                    println!("\r{}: command not found", piped_cmd.command.trim());
-                    continue;
-                }
+            if let Err(cmd_name) = path.resolve_piped_commands(&mut parsed_command) {
+                println!("\r{}: command not found", cmd_name.trim());
+                continue;
             }
 
             let command = &parsed_command.command;
-            if let Some(builtin_command) = builtin_commands.get(command.as_str()) {
+            if parsed_command.piped_command.is_some() {
+                let command = command::ShellCommand::Exec;
+                execute(|| command.run(&parsed_command));
+            } else if let Some(builtin_command) = builtin_commands.get(command.as_str()) {
                 execute(|| builtin_command.run(&parsed_command));
             } else if let Some(_found_executable) = path.find_command(command.as_str()) {
                 let command = command::ShellCommand::Exec;

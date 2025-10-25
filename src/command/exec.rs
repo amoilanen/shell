@@ -2,8 +2,11 @@ use std::process::{Command, Stdio};
 use std::path::Path;
 use std::io::Write;
 use std::process::Output;
-use std::fs::OpenOptions;
+use std::fs::{OpenOptions, File};
+use std::os::unix::net::UnixStream;
+use std::os::unix::io::{IntoRawFd, FromRawFd};
 use crate::command::ParsedCommand;
+use crate::command::builtin;
 
 
 #[derive(Debug, PartialEq)]
@@ -33,50 +36,81 @@ fn run_pipeline(commands: &[ParsedCommand]) -> Result<(), anyhow::Error> {
         return Ok(());
     }
 
-    let mut previous = None;
+    let mut previous_stdin: Option<Stdio> = None;
     let mut children = Vec::new();
 
     for (i, cmd) in commands.iter().enumerate() {
         let is_last_command = i >= commands.len() - 1;
-        let mut command = build_command_from_parsed(&cmd.command, &cmd.args);
+        let is_builtin = builtin::is_builtin(&cmd.command);
 
-        if let Some(output) = previous.take() {
-            command.stdin(output);
-        }
+        if is_builtin {
+            let builtin_output = builtin::generate_output(&cmd.command, &cmd.args)?;
 
-        if !is_last_command {
-            command.stdout(Stdio::piped());
+            if is_last_command {
+                write_builtin_output(cmd, &builtin_output)?;
+            } else {
+                let (mut writer, reader) = UnixStream::pair()
+                    .map_err(|e| anyhow::anyhow!("Failed to create socket pair: {}", e))?;
+
+                writer.write_all(&builtin_output)?;
+                drop(writer);
+
+                let file = unsafe { File::from_raw_fd(reader.into_raw_fd()) };
+                previous_stdin = Some(Stdio::from(file));
+            }
         } else {
-            // For the last command, pipe stdout and stderr so they can be captured
-            command.stdout(Stdio::piped());
-            command.stderr(Stdio::piped());
+            let mut command = build_command_from_parsed(&cmd.command, &cmd.args);
+
+            if let Some(stdin) = previous_stdin.take() {
+                command.stdin(stdin);
+            }
+
+            if !is_last_command {
+                command.stdout(Stdio::piped());
+            } else {
+                // For the last command, only pipe if we need to capture output
+                // (i.e., there's a redirect)
+                if cmd.stdout_redirect.is_some() || cmd.stderr_redirect.is_some() {
+                    command.stdout(Stdio::piped());
+                    command.stderr(Stdio::piped());
+                }
+            }
+
+            let mut child = command.spawn()?;
+
+            if !is_last_command {
+                let stdout = child
+                    .stdout
+                    .take()
+                    .expect("Failed to capture stdout of intermediate command");
+                previous_stdin = Some(Stdio::from(stdout));
+            }
+
+            children.push(child);
         }
-
-        let mut child = command.spawn()?;
-
-        // Save this child’s stdout to connect to the next command’s stdin
-        if !is_last_command {
-            let stdout = child
-                .stdout
-                .take()
-                .expect("Failed to capture stdout of intermediate command");
-            previous = Some(Stdio::from(stdout));
-        }
-
-        children.push(child);
     }
 
-    // Wait for the last command and capture its stdout
-    let last_child = children.pop().unwrap();
-    let output = last_child.wait_with_output()?;
+    if !children.is_empty() {
+        let last_command = &commands[commands.len() - 1];
+        let is_last_builtin = builtin::is_builtin(&last_command.command);
 
-    // Ensure all intermediate children are reaped
-    for mut c in children {
-        let _ = c.wait();
+        if !is_last_builtin {
+            // Last command was external, write its output
+            let last_child = children.pop().unwrap();
+            let output = last_child.wait_with_output()?;
+
+            for mut c in children {
+                let _ = c.wait();
+            }
+
+            write_command_output(last_command, &output)?;
+        } else {
+            // Last command was builtin (already wrote output), just wait for external commands
+            for mut c in children {
+                let _ = c.wait();
+            }
+        }
     }
-    let last_command = &commands[commands.len() - 1];
-
-    write_command_output(last_command, &output)?;
 
     Ok(())
 }
@@ -91,6 +125,15 @@ fn write_command_output(parsed_command: &ParsedCommand, output: &Output) -> Resu
     let stderr = &output.stderr;
     write_output(&parsed_command.stdout_redirect.as_ref().map(|r| (r.filename.as_str(), r.should_append)), stdout)?;
     write_output(&parsed_command.stderr_redirect.as_ref().map(|r| (r.filename.as_str(), r.should_append)), stderr)?;
+    Ok(())
+}
+
+fn write_builtin_output(parsed_command: &ParsedCommand, stdout: &[u8]) -> Result<(), anyhow::Error> {
+    write_output(&parsed_command.stdout_redirect.as_ref().map(|r| (r.filename.as_str(), r.should_append)), stdout)?;
+    // Builtins don't produce stderr output
+    if let Some(ref stderr_redirect) = parsed_command.stderr_redirect {
+        write_output(&Some((stderr_redirect.filename.as_str(), stderr_redirect.should_append)), &[])?;
+    }
     Ok(())
 }
 
@@ -715,4 +758,109 @@ mod tests {
         cleanup_files(&[&input_file, &stdout_path]);
         Ok(())
     }
+
+    #[test]
+    fn test_pipeline_builtin_echo_to_wc() -> Result<(), anyhow::Error> {
+        let stdout_path = create_temp_file_path("test_builtin_echo_wc.txt");
+
+        let second_cmd = ParsedCommand {
+            command: "wc".to_string(),
+            args: vec!["-w".to_string()],
+            stdout_redirect: Some(crate::command::Redirect {
+                filename: stdout_path.clone(),
+                should_append: false
+            }),
+            stderr_redirect: None,
+            piped_command: None
+        };
+
+        let first_cmd = ParsedCommand {
+            command: "echo".to_string(),
+            args: vec!["abc".to_string()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(second_cmd))
+        };
+
+        run(&first_cmd)?;
+
+        let content = read_file_content(&stdout_path)?;
+        let trimmed = content.trim();
+        assert_eq!(trimmed, "1", "Word count should be 1, got: {}", trimmed);
+
+        cleanup_files(&[&stdout_path]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_pipeline_builtin_pwd_to_cat() -> Result<(), anyhow::Error> {
+        let stdout_path = create_temp_file_path("test_builtin_pwd_cat.txt");
+
+        let second_cmd = ParsedCommand {
+            command: "cat".to_string(),
+            args: vec![],
+            stdout_redirect: Some(crate::command::Redirect {
+                filename: stdout_path.clone(),
+                should_append: false
+            }),
+            stderr_redirect: None,
+            piped_command: None
+        };
+
+        let first_cmd = ParsedCommand {
+            command: "pwd".to_string(),
+            args: vec![],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(second_cmd))
+        };
+
+        run(&first_cmd)?;
+
+        let content = read_file_content(&stdout_path)?;
+        assert!(content.len() > 0, "Output should contain current directory path");
+        assert!(content.contains("/"), "Output should be a path");
+
+        cleanup_files(&[&stdout_path]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_pipeline_external_to_builtin_echo() -> Result<(), anyhow::Error> {
+        let input_file = create_temp_file_path("test_ext_to_builtin_input.txt");
+        let stdout_path = create_temp_file_path("test_ext_to_builtin_output.txt");
+
+        write_output_to_file(&input_file, "file content\n".as_bytes(), false)?;
+
+        let second_cmd = ParsedCommand {
+            command: "echo".to_string(),
+            args: vec!["final output".to_string()],
+            stdout_redirect: Some(crate::command::Redirect {
+                filename: stdout_path.clone(),
+                should_append: false
+            }),
+            stderr_redirect: None,
+            piped_command: None
+        };
+
+        let first_cmd = ParsedCommand {
+            command: "cat".to_string(),
+            args: vec![input_file.clone()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(second_cmd))
+        };
+
+        run(&first_cmd)?;
+
+        let content = read_file_content(&stdout_path)?;
+        assert_eq!(content.trim(), "final output",
+            "Output should only contain builtin echo output, not cat output. Got: {}", content);
+        assert!(!content.contains("file content"),
+            "Output should NOT contain the external command output when last command is builtin");
+
+        cleanup_files(&[&input_file, &stdout_path]);
+        Ok(())
+    }
+
 }

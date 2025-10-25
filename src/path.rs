@@ -2,6 +2,7 @@ use std::path;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use crate::command::{self, ParsedCommand};
 
 #[derive(Debug, Clone)]
 pub(crate) struct Path {
@@ -13,6 +14,23 @@ impl Path {
         Ok(Path {
             directories: input.split(":").map(|p| p.to_string()).collect()
         })
+    }
+
+    pub(crate) fn resolve_piped_commands(
+        &self,
+        cmd: &mut ParsedCommand
+    ) -> Result<(), String> {
+        if let Some(piped_cmd) = &mut cmd.piped_command {
+            if !command::builtin::is_builtin(&piped_cmd.command) {
+                if let Some(found_piped_executable) = self.find_command(&piped_cmd.command) {
+                    piped_cmd.command = found_piped_executable;
+                } else {
+                    return Err(piped_cmd.command.clone());
+                }
+            }
+            self.resolve_piped_commands(piped_cmd)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn find_command(&self, command_name: &str) -> Option<String> {
@@ -213,5 +231,216 @@ mod tests {
 
         let matches = path.find_matching_executables("cat");
         assert_eq!(matches, vec!["cat"]);
+    }
+
+    #[test]
+    fn test_resolve_piped_commands_no_pipe() {
+        let temp_dir = create_test_directory();
+        let path = Path {
+            directories: vec![temp_dir.path().to_str().unwrap().to_string()]
+        };
+
+        let mut cmd = ParsedCommand {
+            command: "echo".to_string(),
+            args: vec!["hello".to_string()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: None,
+        };
+
+        let result = path.resolve_piped_commands(&mut cmd);
+        assert!(result.is_ok());
+        assert_eq!(cmd.command, "echo");
+    }
+
+    #[test]
+    fn test_resolve_piped_commands_single_builtin() {
+        let temp_dir = create_test_directory();
+        let path = Path {
+            directories: vec![temp_dir.path().to_str().unwrap().to_string()]
+        };
+
+        let mut cmd = ParsedCommand {
+            command: "echo".to_string(),
+            args: vec!["hello".to_string()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(ParsedCommand {
+                command: "pwd".to_string(),
+                args: vec![],
+                stdout_redirect: None,
+                stderr_redirect: None,
+                piped_command: None,
+            })),
+        };
+
+        let result = path.resolve_piped_commands(&mut cmd);
+        assert!(result.is_ok());
+        assert_eq!(cmd.piped_command.as_ref().unwrap().command, "pwd");
+    }
+
+    #[test]
+    fn test_resolve_piped_commands_single_external() {
+        let temp_dir = create_test_directory();
+        let cat_path = create_executable_file(temp_dir.path(), "cat");
+
+        let path = Path {
+            directories: vec![temp_dir.path().to_str().unwrap().to_string()]
+        };
+
+        let mut cmd = ParsedCommand {
+            command: "echo".to_string(),
+            args: vec!["hello".to_string()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(ParsedCommand {
+                command: "cat".to_string(),
+                args: vec![],
+                stdout_redirect: None,
+                stderr_redirect: None,
+                piped_command: None,
+            })),
+        };
+
+        let result = path.resolve_piped_commands(&mut cmd);
+        assert!(result.is_ok());
+        assert_eq!(cmd.piped_command.as_ref().unwrap().command, cat_path.to_str().unwrap());
+    }
+
+    #[test]
+    fn test_resolve_piped_commands_external_not_found() {
+        let temp_dir = create_test_directory();
+        let path = Path {
+            directories: vec![temp_dir.path().to_str().unwrap().to_string()]
+        };
+
+        let mut cmd = ParsedCommand {
+            command: "echo".to_string(),
+            args: vec!["hello".to_string()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(ParsedCommand {
+                command: "nonexistent".to_string(),
+                args: vec![],
+                stdout_redirect: None,
+                stderr_redirect: None,
+                piped_command: None,
+            })),
+        };
+
+        let result = path.resolve_piped_commands(&mut cmd);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "nonexistent");
+    }
+
+    #[test]
+    fn test_resolve_piped_commands_multiple_externals() {
+        let temp_dir = create_test_directory();
+        let cat_path = create_executable_file(temp_dir.path(), "cat");
+        let grep_path = create_executable_file(temp_dir.path(), "grep");
+
+        let path = Path {
+            directories: vec![temp_dir.path().to_str().unwrap().to_string()]
+        };
+
+        let mut cmd = ParsedCommand {
+            command: "echo".to_string(),
+            args: vec!["hello".to_string()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(ParsedCommand {
+                command: "cat".to_string(),
+                args: vec![],
+                stdout_redirect: None,
+                stderr_redirect: None,
+                piped_command: Some(Box::new(ParsedCommand {
+                    command: "grep".to_string(),
+                    args: vec!["hello".to_string()],
+                    stdout_redirect: None,
+                    stderr_redirect: None,
+                    piped_command: None,
+                })),
+            })),
+        };
+
+        let result = path.resolve_piped_commands(&mut cmd);
+        assert!(result.is_ok());
+        assert_eq!(cmd.piped_command.as_ref().unwrap().command, cat_path.to_str().unwrap());
+        assert_eq!(
+            cmd.piped_command.as_ref().unwrap().piped_command.as_ref().unwrap().command,
+            grep_path.to_str().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_resolve_piped_commands_mixed_builtin_and_external() {
+        let temp_dir = create_test_directory();
+        let cat_path = create_executable_file(temp_dir.path(), "cat");
+
+        let path = Path {
+            directories: vec![temp_dir.path().to_str().unwrap().to_string()]
+        };
+
+        let mut cmd = ParsedCommand {
+            command: "echo".to_string(),
+            args: vec!["hello".to_string()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(ParsedCommand {
+                command: "cat".to_string(),
+                args: vec![],
+                stdout_redirect: None,
+                stderr_redirect: None,
+                piped_command: Some(Box::new(ParsedCommand {
+                    command: "pwd".to_string(),
+                    args: vec![],
+                    stdout_redirect: None,
+                    stderr_redirect: None,
+                    piped_command: None,
+                })),
+            })),
+        };
+
+        let result = path.resolve_piped_commands(&mut cmd);
+        assert!(result.is_ok());
+        assert_eq!(cmd.piped_command.as_ref().unwrap().command, cat_path.to_str().unwrap());
+        assert_eq!(
+            cmd.piped_command.as_ref().unwrap().piped_command.as_ref().unwrap().command,
+            "pwd"
+        );
+    }
+
+    #[test]
+    fn test_resolve_piped_commands_error_in_middle_of_chain() {
+        let temp_dir = create_test_directory();
+        let _cat_path = create_executable_file(temp_dir.path(), "cat");
+
+        let path = Path {
+            directories: vec![temp_dir.path().to_str().unwrap().to_string()]
+        };
+
+        let mut cmd = ParsedCommand {
+            command: "echo".to_string(),
+            args: vec!["hello".to_string()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            piped_command: Some(Box::new(ParsedCommand {
+                command: "cat".to_string(),
+                args: vec![],
+                stdout_redirect: None,
+                stderr_redirect: None,
+                piped_command: Some(Box::new(ParsedCommand {
+                    command: "nonexistent".to_string(),
+                    args: vec![],
+                    stdout_redirect: None,
+                    stderr_redirect: None,
+                    piped_command: None,
+                })),
+            })),
+        };
+
+        let result = path.resolve_piped_commands(&mut cmd);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "nonexistent");
     }
 }
