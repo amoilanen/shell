@@ -1,8 +1,7 @@
-use std::collections::HashMap;
 use std::io::{self, Write};
 use std::env;
 use std::panic;
-use crate::command::{ParsedCommand, ShellCommand};
+use crate::command::{ParsedCommand, builtin};
 use crate::input::autocompletion::AutoCompletion;
 use crate::input::read_line_with_completion;
 
@@ -31,14 +30,6 @@ where
 
 
 fn main() -> Result<(), anyhow::Error> {
-    let builtin_commands: HashMap<&str, ShellCommand> = [
-        ("echo", command::ShellCommand::Echo {}),
-        ("cd", command::ShellCommand::Cd {}),
-        ("pwd", command::ShellCommand::Pwd {}),
-        ("exit", command::ShellCommand::Exit {}),
-        ("type", command::ShellCommand::Type {})
-    ].into_iter().collect();
-
     let path = path::Path::parse(&env::var("PATH")?)?;
     let automcomplete_path = path.clone();
     let autocomplete = AutoCompletion::new_with_dynamic_completion(
@@ -61,7 +52,7 @@ fn main() -> Result<(), anyhow::Error> {
             if parsed_command.piped_command.is_some() {
                 let command = command::ShellCommand::Exec;
                 execute(|| command.run(&parsed_command));
-            } else if let Some(builtin_command) = builtin_commands.get(command.as_str()) {
+            } else if let Some(builtin_command) = builtin::BUILTIN_COMMANDS.get(command.as_str()) {
                 execute(|| builtin_command.run(&parsed_command));
             } else if let Some(_found_executable) = path.find_command(command.as_str()) {
                 let command = command::ShellCommand::Exec;

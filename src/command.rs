@@ -7,7 +7,8 @@ pub(crate) enum ShellCommand {
     Exit,
     Pwd,
     Type,
-    Exec
+    Exec,
+    History
 }
 
 impl ShellCommand {
@@ -21,6 +22,7 @@ impl ShellCommand {
             ShellCommand::Exit => builtin::exit::run(args.as_slice()),
             ShellCommand::Pwd => builtin::pwd::run(args.as_slice()),
             ShellCommand::Type => builtin::type_::run(args.as_slice()),
+            ShellCommand::History => builtin::history::run(args.as_slice())
         }
     }
 }
