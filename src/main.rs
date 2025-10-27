@@ -4,10 +4,12 @@ use std::panic;
 use crate::command::{ParsedCommand, builtin};
 use crate::input::autocompletion::AutoCompletion;
 use crate::input::read_line_with_completion;
+use crate::history::History;
 
 mod path;
 mod command;
 mod input;
+mod history;
 
 fn execute<F>(f: F) -> ()
 where
@@ -31,6 +33,7 @@ where
 
 fn main() -> Result<(), anyhow::Error> {
     let path = path::Path::parse(&env::var("PATH")?)?;
+    let mut history = History::new();
     let automcomplete_path = path.clone();
     let autocomplete = AutoCompletion::new_with_dynamic_completion(
         vec!["echo", "cd", "pwd", "exit", "type"],
@@ -43,6 +46,7 @@ fn main() -> Result<(), anyhow::Error> {
         let input = read_line_with_completion(&autocomplete)?;
         let parsed_command = ParsedCommand::parse_command(&input)?;
         if let Some(mut parsed_command) = parsed_command {
+            history.append(&input);
             if let Err(cmd_name) = path.resolve_piped_commands(&mut parsed_command) {
                 println!("\r{}: command not found", cmd_name.trim());
                 continue;
@@ -51,12 +55,12 @@ fn main() -> Result<(), anyhow::Error> {
             let command = &parsed_command.command;
             if parsed_command.piped_command.is_some() {
                 let command = command::ShellCommand::Exec;
-                execute(|| command.run(&parsed_command));
+                execute(|| command.run(&parsed_command, &history));
             } else if let Some(builtin_command) = builtin::BUILTIN_COMMANDS.get(command.as_str()) {
-                execute(|| builtin_command.run(&parsed_command));
+                execute(|| builtin_command.run(&parsed_command, &history));
             } else if let Some(_found_executable) = path.find_command(command.as_str()) {
                 let command = command::ShellCommand::Exec;
-                execute(|| command.run(&parsed_command));
+                execute(|| command.run(&parsed_command, &history));
             } else {
                 println!("\r{}: command not found", command.trim());
             }

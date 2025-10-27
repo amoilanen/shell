@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::command::{self, ShellCommand};
+use crate::{command::{self, ShellCommand}, history::History};
 use lazy_static::lazy_static;
 
 pub(crate) mod cd;
@@ -26,14 +26,14 @@ pub(crate) fn is_builtin(command: &str) -> bool {
     BUILTIN_COMMANDS.keys().any(|key| key == &command)
 }
 
-pub(crate) fn generate_output(command: &str, args: &[String]) -> Result<Vec<u8>, anyhow::Error> {
+pub(crate) fn generate_output(command: &str, args: &[String], history: &History) -> Result<Vec<u8>, anyhow::Error> {
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
     match command {
         "echo" => echo::generate_output(&args_str),
         "pwd" => pwd::generate_output(),
         "type" => type_::generate_output(&args_str),
-        "history" => history::generate_output(&args_str),
+        "history" => history::generate_output(&args_str, history),
         "cd" | "exit" => {
             // cd and exit don't make sense in a pipeline, return empty output
             Ok(Vec::new())

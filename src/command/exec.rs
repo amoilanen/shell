@@ -7,6 +7,7 @@ use std::os::unix::net::UnixStream;
 use std::os::unix::io::{IntoRawFd, FromRawFd};
 use crate::command::ParsedCommand;
 use crate::command::builtin;
+use crate::history::History;
 
 
 #[derive(Debug, PartialEq)]
@@ -15,9 +16,9 @@ struct ExecutableInfo {
     pub directory: String,
 }
 
-pub(crate) fn run(parsed_command: &ParsedCommand) -> Result<(), anyhow::Error> {
+pub(crate) fn run(parsed_command: &ParsedCommand, history: &History) -> Result<(), anyhow::Error> {
     let commands = get_pipeline_commands(parsed_command);
-    run_pipeline(&commands)?;
+    run_pipeline(&commands, history)?;
     Ok(())
 }
 
@@ -31,7 +32,7 @@ fn get_pipeline_commands(command: &ParsedCommand) -> Vec<ParsedCommand> {
     commands
 }
 
-fn run_pipeline(commands: &[ParsedCommand]) -> Result<(), anyhow::Error> {
+fn run_pipeline(commands: &[ParsedCommand], history: &History) -> Result<(), anyhow::Error> {
     if commands.is_empty() {
         return Ok(());
     }
@@ -44,7 +45,7 @@ fn run_pipeline(commands: &[ParsedCommand]) -> Result<(), anyhow::Error> {
         let is_builtin = builtin::is_builtin(&cmd.command);
 
         if is_builtin {
-            let builtin_output = builtin::generate_output(&cmd.command, &cmd.args)?;
+            let builtin_output = builtin::generate_output(&cmd.command, &cmd.args, history)?;
 
             if is_last_command {
                 write_builtin_output(cmd, &builtin_output)?;
@@ -372,7 +373,7 @@ mod tests {
             Some(stderr_path.clone())
         );
 
-        run(&parsed_command)?;
+        run(&parsed_command, &History::new())?;
 
         assert_file_contains_error_message(&stderr_path, "")?;
         cleanup_files(&[&stderr_path]);
@@ -391,7 +392,7 @@ mod tests {
             Some(stderr_path.clone())
         );
 
-        run(&parsed_command)?;
+        run(&parsed_command, &History::new())?;
 
         assert_file_contains_error_message(&stderr_path, "")?;
 
@@ -413,7 +414,7 @@ mod tests {
             Some(stderr_path.clone())
         );
 
-        run(&parsed_command)?;
+        run(&parsed_command, &History::new())?;
 
         assert_file_empty_or_missing(&stderr_path, "Stderr file should be empty when command produces no stderr")?;
         cleanup_files(&[&stderr_path]);
@@ -431,7 +432,7 @@ mod tests {
             None
         );
 
-        run(&parsed_command)?;
+        run(&parsed_command, &History::new())?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.contains("hello world"), "Stdout file should contain command output");
@@ -451,7 +452,7 @@ mod tests {
             None
         );
 
-        run(&parsed_command)?;
+        run(&parsed_command, &History::new())?;
 
         assert_file_empty_or_missing(&stdout_path, "Stdout file should be empty when command produces no stdout")?;
         cleanup_files(&[&stdout_path]);
@@ -477,7 +478,7 @@ mod tests {
             piped_command: None
         };
 
-        run(&parsed_command)?;
+        run(&parsed_command, &History::new())?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.contains("initial content\nappended content\n"), "File should contain all content");
@@ -505,7 +506,7 @@ mod tests {
             piped_command: None
         };
 
-        run(&parsed_command)?;
+        run(&parsed_command, &History::new())?;
 
         let content = read_file_content(&stderr_path)?;
         assert!(content.contains("initial error"), "File should contain initial content");
@@ -539,7 +540,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run(&first_cmd)?;
+        run(&first_cmd, &History::new())?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.contains("hello world"), "Pipeline output should contain 'hello world', got: {}", content);
@@ -571,7 +572,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run(&first_cmd)?;
+        run(&first_cmd, &History::new())?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.contains("bar"), "Pipeline should filter and contain 'bar', got: {}", content);
@@ -605,7 +606,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run(&first_cmd)?;
+        run(&first_cmd, &History::new())?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.contains("line1"), "Pipeline should contain line1");
@@ -638,7 +639,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run(&first_cmd)?;
+        run(&first_cmd, &History::new())?;
 
         let content = read_file_content(&stdout_path)?;
         let trimmed = content.trim();
@@ -675,7 +676,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run(&first_cmd)?;
+        run(&first_cmd, &History::new())?;
 
         assert_file_empty_or_missing(&stdout_path, "Stdout should be empty when grep finds no matches")?;
 
@@ -707,7 +708,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run(&first_cmd)?;
+        run(&first_cmd, &History::new())?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.contains("initial"), "File should contain initial content");
@@ -743,7 +744,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run(&first_cmd)?;
+        run(&first_cmd, &History::new())?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.contains("1. banana strawberry"), "Output should contain first line, got: {}", content);
@@ -777,7 +778,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run(&first_cmd)?;
+        run(&first_cmd, &History::new())?;
 
         let content = read_file_content(&stdout_path)?;
         let trimmed = content.trim();
@@ -810,7 +811,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run(&first_cmd)?;
+        run(&first_cmd, &History::new())?;
 
         let content = read_file_content(&stdout_path)?;
         assert!(content.len() > 0, "Output should contain current directory path");
@@ -846,7 +847,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run(&first_cmd)?;
+        run(&first_cmd, &History::new())?;
 
         let content = read_file_content(&stdout_path)?;
         assert_eq!(content.trim(), "final output",
@@ -884,7 +885,7 @@ mod tests {
             piped_command: Some(Box::new(second_cmd))
         };
 
-        run(&first_cmd)?;
+        run(&first_cmd, &History::new())?;
 
         let content = read_file_content(&stdout_path)?;
         assert_eq!(content.trim(), "done", "Should output 'done' from echo builtin, got: {}", content);

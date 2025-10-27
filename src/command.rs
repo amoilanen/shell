@@ -1,3 +1,5 @@
+use crate::history::History;
+
 pub mod builtin;
 pub mod exec;
 
@@ -13,16 +15,16 @@ pub(crate) enum ShellCommand {
 
 impl ShellCommand {
 
-    pub(crate) fn run(&self, parsed_command: &ParsedCommand) -> Result<(), anyhow::Error> {
+    pub(crate) fn run(&self, parsed_command: &ParsedCommand, history: &History) -> Result<(), anyhow::Error> {
         let args = parsed_command.get_args();
         match self {
             ShellCommand::Cd => builtin::cd::run(args.as_slice()),
             ShellCommand::Echo => builtin::echo::run(args.as_slice(), parsed_command),
-            ShellCommand::Exec => exec::run(parsed_command),
+            ShellCommand::Exec => exec::run(parsed_command, history),
             ShellCommand::Exit => builtin::exit::run(args.as_slice()),
             ShellCommand::Pwd => builtin::pwd::run(args.as_slice()),
             ShellCommand::Type => builtin::type_::run(args.as_slice()),
-            ShellCommand::History => builtin::history::run(args.as_slice())
+            ShellCommand::History => builtin::history::run(args.as_slice(), &history)
         }
     }
 }
