@@ -1,3 +1,5 @@
+use std::usize::MAX;
+
 pub(crate) struct History {
     commands: Vec<String>
 }
@@ -12,9 +14,9 @@ impl History {
         self
     }
 
-    pub(crate) fn show(&self) -> String {
+    pub(crate) fn show(&self, limit: Option<usize>) -> String {
         let mut result: String = String::new();
-        for (idx, command) in self.commands.iter().enumerate() {
+        for (idx, command) in self.commands.iter().take(limit.unwrap_or(MAX)).enumerate() {
             result.push_str(&format!("{}  {}\n", (idx + 1), command));
         }
         result
@@ -27,11 +29,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_complete_builtin_commands() {
+    fn test_history_shows_executed_commands() {
         let mut history = History::new();
         history.append("echo hello");
         history.append("echo world");
         history.append("invalid_command");
-        assert_eq!(history.show(), "1  echo hello\n2  echo world\n3  invalid_command\n")
+        assert_eq!(history.show(None), "1  echo hello\n2  echo world\n3  invalid_command\n")
+    }
+
+    #[test]
+    fn test_history_respects_limit_argument() {
+        let mut history = History::new();
+        history.append("echo hello");
+        history.append("echo world");
+        history.append("invalid_command");
+        assert_eq!(history.show(Some(2)), "1  echo hello\n2  echo world\n")
     }
 }
