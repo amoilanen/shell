@@ -207,22 +207,26 @@ fn handle_history_up(input: &mut String, history_index: &mut Option<usize>, hist
     }
 
     let new_index = match history_index {
-        None => 0,
+        None => Some(0),
         Some(idx) => {
             if *idx + 1 < history.len() {
-                *idx + 1
+                Some(*idx + 1)
             } else {
-                return Ok(()); // Already at the oldest command
+                None
             }
         }
     };
-
-    if let Some(cmd) = history.get_last_command_by_idx(new_index) {
-        clear_line(input)?;
-        input.clear();
-        input.push_str(cmd);
-        print_and_flush(cmd)?;
-        *history_index = Some(new_index);
+    match new_index {
+        None => (),
+        Some(new_index) => {
+            if let Some(cmd) = history.get_last_command_by_idx(new_index) {
+                clear_line(input)?;
+                input.clear();
+                input.push_str(cmd);
+                print_and_flush(cmd)?;
+                *history_index = Some(new_index);
+            }
+        }
     }
 
     Ok(())
