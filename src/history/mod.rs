@@ -25,6 +25,19 @@ impl History {
         }
         result
     }
+
+    pub(crate) fn get_last_command_by_idx(&self, index_from_end: usize) -> Option<&str> {
+        if index_from_end >= self.commands.len() {
+            None
+        } else {
+            let index = self.commands.len() - 1 - index_from_end;
+            Some(&self.commands[index])
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.commands.len()
+    }
 }
 
 #[cfg(test)]
@@ -50,12 +63,57 @@ mod tests {
         assert_eq!(history.show(Some(2)), "2  echo world\n3  invalid_command\n")
     }
 
-        #[test]
+    #[test]
     fn test_history_with_too_large_limit_works() {
         let mut history = History::new();
         history.append("echo hello");
         history.append("echo world");
         history.append("invalid_command");
         assert_eq!(history.show(Some(5)), "1  echo hello\n2  echo world\n3  invalid_command\n")
+    }
+
+    #[test]
+    fn test_get_reverse_most_recent() {
+        let mut history = History::new();
+        history.append("echo hello");
+        history.append("echo world");
+        history.append("invalid_command");
+        assert_eq!(history.get_last_command_by_idx(0), Some("invalid_command"));
+    }
+
+    #[test]
+    fn test_get_reverse_second_most_recent() {
+        let mut history = History::new();
+        history.append("echo hello");
+        history.append("echo world");
+        history.append("invalid_command");
+        assert_eq!(history.get_last_command_by_idx(1), Some("echo world"));
+    }
+
+    #[test]
+    fn test_get_reverse_oldest() {
+        let mut history = History::new();
+        history.append("echo hello");
+        history.append("echo world");
+        history.append("invalid_command");
+        assert_eq!(history.get_last_command_by_idx(2), Some("echo hello"));
+    }
+
+    #[test]
+    fn test_get_reverse_out_of_bounds() {
+        let mut history = History::new();
+        history.append("echo hello");
+        assert_eq!(history.get_last_command_by_idx(1), None);
+        assert_eq!(history.get_last_command_by_idx(100), None);
+    }
+
+    #[test]
+    fn test_len() {
+        let mut history = History::new();
+        assert_eq!(history.len(), 0);
+        history.append("echo hello");
+        assert_eq!(history.len(), 1);
+        history.append("echo world");
+        assert_eq!(history.len(), 2);
     }
 }

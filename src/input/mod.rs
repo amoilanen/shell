@@ -1,6 +1,7 @@
 use std::io::{self, Write, Read};
 use termios::{Termios, tcsetattr, TCSANOW, ECHO, ICANON, IEXTEN, ISIG, VMIN, VTIME};
 use crate::input::autocompletion::AutoCompletion;
+use crate::history::History;
 
 pub mod autocompletion;
 
@@ -16,13 +17,15 @@ const BACKSPACE: char = '\u{7f}';
 const DELETE: char = '\u{0008}';
 const BEEP: char = '\x07';
 const CTRL_C: char = '\u{0003}';
+const ESC: char = '\u{001b}';
 
-pub fn read_line_with_completion(autocomplete: &AutoCompletion) -> Result<String, anyhow::Error> {
+pub fn read_line_with_completion(autocomplete: &AutoCompletion, history: &History) -> Result<String, anyhow::Error> {
     let raw_mode = RawMode::enable()?;
     let mut input = String::new();
     let mut stdin = io::stdin();
     let mut buffer = [0; 1];
     let mut last_tab_input: Option<String> = None;
+    let mut history_index: Option<usize> = None;
 
     loop {
         stdin.read_exact(&mut buffer)?;
@@ -41,13 +44,28 @@ pub fn read_line_with_completion(autocomplete: &AutoCompletion) -> Result<String
             }
             BACKSPACE | DELETE => {
                 last_tab_input = None;
+                history_index = None;
                 handle_backspace(&mut input)?;
             }
             TAB => {
+                history_index = None;
                 handle_tab_completion(&mut input, autocomplete, &mut last_tab_input)?;
+            }
+            ESC => {
+                if let Some(arrow) = read_arrow_sequence(&mut stdin)? {
+                    match arrow {
+                        ArrowKey::Up => {
+                            handle_history_up(&mut input, &mut history_index, history)?;
+                        }
+                        ArrowKey::Down => {
+                            handle_history_down(&mut input, &mut history_index, history)?;
+                        }
+                    }
+                }
             }
             _ => {
                 last_tab_input = None;
+                history_index = None;
                 handle_regular_char(&mut input, ch)?;
             }
         }
@@ -150,6 +168,96 @@ fn display_matches_and_reprompt(input: &str, matches: &[String]) -> Result<(), a
 fn print_and_flush(text: &str) -> Result<(), anyhow::Error> {
     print!("{}", text);
     io::stdout().flush()?;
+    Ok(())
+}
+
+enum ArrowKey {
+    Up,
+    Down,
+}
+
+fn read_arrow_sequence(stdin: &mut io::Stdin) -> Result<Option<ArrowKey>, anyhow::Error> {
+    let mut buffer = [0; 1];
+    stdin.read_exact(&mut buffer)?;
+    if buffer[0] as char != '[' {
+        return Ok(None);
+    }
+    stdin.read_exact(&mut buffer)?;
+    match buffer[0] as char {
+        'A' => Ok(Some(ArrowKey::Up)),
+        'B' => Ok(Some(ArrowKey::Down)),
+        _ => Ok(None),
+    }
+}
+
+fn clear_line(input: &str) -> Result<(), anyhow::Error> {
+    // Move cursor to beginning of input (after prompt)
+    for _ in 0..input.len() {
+        print!("\x08");
+    }
+    // Clear from cursor to end of line
+    print!("\x1b[K");
+    io::stdout().flush()?;
+    Ok(())
+}
+
+fn handle_history_up(input: &mut String, history_index: &mut Option<usize>, history: &History) -> Result<(), anyhow::Error> {
+    if history.len() == 0 {
+        return Ok(());
+    }
+
+    let new_index = match history_index {
+        None => 0,
+        Some(idx) => {
+            if *idx + 1 < history.len() {
+                *idx + 1
+            } else {
+                return Ok(()); // Already at the oldest command
+            }
+        }
+    };
+
+    if let Some(cmd) = history.get_last_command_by_idx(new_index) {
+        clear_line(input)?;
+        input.clear();
+        input.push_str(cmd);
+        print_and_flush(cmd)?;
+        *history_index = Some(new_index);
+    }
+
+    Ok(())
+}
+
+fn handle_history_down(input: &mut String, history_index: &mut Option<usize>, history: &History) -> Result<(), anyhow::Error> {
+    let new_index = match history_index {
+        None => return Ok(()), // Not navigating history, do nothing
+        Some(idx) => {
+            if *idx == 0 {
+                None // Go back to empty line
+            } else {
+                Some(*idx - 1) // Navigate to newer command
+            }
+        }
+    };
+
+    match new_index {
+        None => {
+            // Back to empty line
+            clear_line(input)?;
+            input.clear();
+            *history_index = None;
+        }
+        Some(idx) => {
+            if let Some(cmd) = history.get_last_command_by_idx(idx) {
+                clear_line(input)?;
+                input.clear();
+                input.push_str(cmd);
+                print_and_flush(cmd)?;
+                *history_index = Some(idx);
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -347,5 +455,130 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(input, "e");
         assert_eq!(last_tab_input, None);
+    }
+
+    #[test]
+    fn test_handle_history_up_empty_history() {
+        use crate::history::History;
+        let history = History::new();
+        let mut input = String::new();
+        let mut history_index = None;
+
+        let result = handle_history_up(&mut input, &mut history_index, &history);
+        assert!(result.is_ok());
+        assert_eq!(input, "");
+        assert_eq!(history_index, None);
+    }
+
+    #[test]
+    fn test_handle_history_up_first_command() {
+        use crate::history::History;
+        let mut history = History::new();
+        history.append("echo hello");
+        history.append("echo world");
+
+        let mut input = String::new();
+        let mut history_index = None;
+
+        let result = handle_history_up(&mut input, &mut history_index, &history);
+        assert!(result.is_ok());
+        assert_eq!(input, "echo world");
+        assert_eq!(history_index, Some(0));
+    }
+
+    #[test]
+    fn test_handle_history_up_second_command() {
+        use crate::history::History;
+        let mut history = History::new();
+        history.append("echo hello");
+        history.append("echo world");
+
+        let mut input = String::new();
+        let mut history_index = None;
+
+        let mut result = handle_history_up(&mut input, &mut history_index, &history);
+        assert!(result.is_ok());
+        result = handle_history_up(&mut input, &mut history_index, &history);
+        assert!(result.is_ok());
+        assert_eq!(input, "echo hello");
+        assert_eq!(history_index, Some(1));
+    }
+
+    #[test]
+    fn test_handle_history_up_at_oldest() {
+        use crate::history::History;
+        let mut history = History::new();
+        history.append("echo world");
+        history.append("echo hello");
+
+        let mut input = String::from("echo world");
+        let mut history_index = Some(1);
+
+        // Should not change when already at oldest
+        let result = handle_history_up(&mut input, &mut history_index, &history);
+        assert!(result.is_ok());
+        assert_eq!(input, "echo world");
+        assert_eq!(history_index, Some(1));
+    }
+
+    #[test]
+    fn test_handle_history_down_not_navigating() {
+        use crate::history::History;
+        let mut history = History::new();
+        history.append("echo world");
+        history.append("echo hello");
+
+        let mut input = String::from("test");
+        let mut history_index = None;
+
+        let result = handle_history_down(&mut input, &mut history_index, &history);
+        assert!(result.is_ok());
+        assert_eq!(input, "test");
+        assert_eq!(history_index, None);
+    }
+
+    #[test]
+    fn test_handle_history_down_to_empty() {
+        use crate::history::History;
+        let mut history = History::new();
+        history.append("echo hello");
+
+        let mut input = String::from("echo hello");
+        let mut history_index = Some(0);
+
+        let result = handle_history_down(&mut input, &mut history_index, &history);
+        assert!(result.is_ok());
+        assert_eq!(input, "");
+        assert_eq!(history_index, None);
+    }
+
+    #[test]
+    fn test_handle_history_down_to_newer() {
+        use crate::history::History;
+        let mut history = History::new();
+        history.append("echo hello");
+        history.append("echo world");
+
+        let mut input = String::from("echo hello");
+        let mut history_index = Some(1);
+
+        let result = handle_history_down(&mut input, &mut history_index, &history);
+        assert!(result.is_ok());
+        assert_eq!(input, "echo world");
+        assert_eq!(history_index, Some(0));
+    }
+
+    #[test]
+    fn test_clear_line_empty_input() {
+        let input = "";
+        let result = clear_line(input);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_clear_line_with_content() {
+        let input = "echo hello";
+        let result = clear_line(input);
+        assert!(result.is_ok());
     }
 }

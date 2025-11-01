@@ -43,7 +43,7 @@ fn main() -> Result<(), anyhow::Error> {
     loop {
         print!("\r$ ");
         io::stdout().flush()?;
-        let input = read_line_with_completion(&autocomplete)?;
+        let input = read_line_with_completion(&autocomplete, &history)?;
         let parsed_command = ParsedCommand::parse_command(&input)?;
         if let Some(mut parsed_command) = parsed_command {
             history.append(&input);
