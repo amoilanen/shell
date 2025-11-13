@@ -11,9 +11,9 @@ mod command;
 mod input;
 mod history;
 
-fn execute<F>(f: F) -> ()
+fn execute<F>(mut f: F) -> ()
 where
-  F: Fn() -> Result<(), anyhow::Error>,
+  F: FnMut() -> Result<(), anyhow::Error>,
 {
     match panic::catch_unwind(panic::AssertUnwindSafe(|| {
         f()
@@ -55,12 +55,12 @@ fn main() -> Result<(), anyhow::Error> {
             let command = &parsed_command.command;
             if parsed_command.piped_command.is_some() {
                 let command = command::ShellCommand::Exec;
-                execute(|| command.run(&parsed_command, &history));
+                execute(|| command.run(&parsed_command, &mut history));
             } else if let Some(builtin_command) = builtin::BUILTIN_COMMANDS.get(command.as_str()) {
-                execute(|| builtin_command.run(&parsed_command, &history));
+                execute(|| builtin_command.run(&parsed_command, &mut history));
             } else if let Some(_found_executable) = path.find_command(command.as_str()) {
                 let command = command::ShellCommand::Exec;
-                execute(|| command.run(&parsed_command, &history));
+                execute(|| command.run(&parsed_command, &mut history));
             } else {
                 println!("\r{}: command not found", command.trim());
             }

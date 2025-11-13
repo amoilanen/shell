@@ -1,3 +1,6 @@
+use std::{ fs::File, io::{BufRead, BufReader}, path::PathBuf };
+use anyhow::Error;
+
 pub(crate) struct History {
     commands: Vec<String>
 }
@@ -5,6 +8,17 @@ pub(crate) struct History {
 impl History {
     pub(crate) fn new() -> Self {
         History { commands: Vec::new() }
+    }
+
+    pub(crate) fn read_from_file(&mut self, path: &PathBuf) -> Result<(), Error> {
+        let file = File::open(path)?;
+        for line in BufReader::new(file).lines() {
+            let line = line?;
+            if !line.is_empty() {
+                self.append(&line);
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn append(&mut self, command: &str) -> &Self {
