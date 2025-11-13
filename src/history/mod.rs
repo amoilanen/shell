@@ -58,6 +58,8 @@ impl History {
 mod tests {
 
     use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_history_shows_executed_commands() {
@@ -129,5 +131,104 @@ mod tests {
         assert_eq!(history.len(), 1);
         history.append("echo world");
         assert_eq!(history.len(), 2);
+    }
+
+    #[test]
+    fn test_read_from_file_basic() -> Result<(), Box<dyn std::error::Error>> {
+        let mut temp_file = NamedTempFile::new()?;
+        writeln!(temp_file, "echo hello")?;
+        writeln!(temp_file, "echo world")?;
+        writeln!(temp_file, "pwd")?;
+        temp_file.flush()?;
+
+        let path = PathBuf::from(temp_file.path());
+        let mut history = History::new();
+        history.read_from_file(&path)?;
+
+        assert_eq!(history.len(), 3);
+        assert_eq!(history.get_last_command_by_idx(2), Some("echo hello"));
+        assert_eq!(history.get_last_command_by_idx(1), Some("echo world"));
+        assert_eq!(history.get_last_command_by_idx(0), Some("pwd"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_from_file_skips_empty_lines() -> Result<(), Box<dyn std::error::Error>> {
+        let mut temp_file = NamedTempFile::new()?;
+        writeln!(temp_file, "echo hello")?;
+        writeln!(temp_file, "")?;
+        writeln!(temp_file, "echo world")?;
+        writeln!(temp_file, "")?;
+        writeln!(temp_file, "pwd")?;
+        temp_file.flush()?;
+
+        let path = PathBuf::from(temp_file.path());
+        let mut history = History::new();
+        history.read_from_file(&path)?;
+
+        assert_eq!(history.len(), 3);
+        assert_eq!(history.show(None), "1  echo hello\n2  echo world\n3  pwd\n");
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_from_file_empty_file() -> Result<(), Box<dyn std::error::Error>> {
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.flush()?;
+
+        let path = PathBuf::from(temp_file.path());
+        let mut history = History::new();
+        history.read_from_file(&path)?;
+
+        assert_eq!(history.len(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_from_file_nonexistent_file() {
+        let path = PathBuf::from("/nonexistent/path/to/file.txt");
+        let mut history = History::new();
+        let result = history.read_from_file(&path);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_from_file_preserves_existing_commands() -> Result<(), Box<dyn std::error::Error>> {
+        let mut temp_file = NamedTempFile::new()?;
+        writeln!(temp_file, "file_cmd1")?;
+        writeln!(temp_file, "file_cmd2")?;
+        temp_file.flush()?;
+
+        let path = PathBuf::from(temp_file.path());
+        let mut history = History::new();
+        history.append("existing_cmd");
+
+        history.read_from_file(&path)?;
+
+        assert_eq!(history.len(), 3);
+        assert_eq!(history.get_last_command_by_idx(2), Some("existing_cmd"));
+        assert_eq!(history.get_last_command_by_idx(1), Some("file_cmd1"));
+        assert_eq!(history.get_last_command_by_idx(0), Some("file_cmd2"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_from_file_with_special_characters() -> Result<(), Box<dyn std::error::Error>> {
+        let mut temp_file = NamedTempFile::new()?;
+        writeln!(temp_file, "echo 'hello world'")?;
+        writeln!(temp_file, "ls -la /tmp")?;
+        writeln!(temp_file, "echo \"test\" | grep test")?;
+        temp_file.flush()?;
+
+        let path = PathBuf::from(temp_file.path());
+        let mut history = History::new();
+        history.read_from_file(&path)?;
+
+        assert_eq!(history.len(), 3);
+        assert_eq!(history.get_last_command_by_idx(2), Some("echo 'hello world'"));
+        assert_eq!(history.get_last_command_by_idx(1), Some("ls -la /tmp"));
+        assert_eq!(history.get_last_command_by_idx(0), Some("echo \"test\" | grep test"));
+        Ok(())
     }
 }
