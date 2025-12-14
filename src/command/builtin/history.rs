@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 use crate::history::History;
+use anyhow::anyhow;
 
 pub(crate) fn generate_output(args: &[&str], history: &History) -> Result<Vec<u8>, anyhow::Error> {
     let limit = args.get(0)
@@ -13,7 +14,13 @@ pub(crate) fn run(args: &[&str], history: &mut History) -> Result<(), anyhow::Er
         if let Some(history_file_path) = args.get(r_option_position + 1) {
             history.read_from_file(&history_file_path.into())
         } else {
-            Ok(())
+            Err(anyhow!("Expected file option, found nothing, args: {:?}", args))
+        }
+    } else if let Some(w_option_position) = args.iter().position(|&arg| arg == "-w") {
+        if let Some(history_file_path) = args.get(w_option_position + 1) {
+            history.write_to_file(&history_file_path.into())
+        } else {
+            Err(anyhow!("Expected file option, found nothing, args: {:?}", args))
         }
     } else {
         let output = generate_output(args, history)?;
@@ -84,6 +91,39 @@ mod tests {
         let output_str = String::from_utf8(output)?;
         assert_eq!(output_str, "1  echo first\n2  echo second\n3  pwd\n");
 
+        fs::remove_file(temp_file).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn test_write_history_to_file() -> Result<(), anyhow::Error> {
+        let mut history = History::new();
+
+        let temp_file = "/tmp/test_history_output.txt";
+        history.append("ls");
+        history.append("cat README.md");
+        history.append("pwd");
+
+        run(&["-w", temp_file], &mut history)?;
+
+        let written_history = fs::read_to_string(temp_file)?;
+
+        assert_eq!(written_history, "ls\ncat README.md\npwd\n");
+        fs::remove_file(temp_file).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn test_write_empty_history_to_file() -> Result<(), anyhow::Error> {
+        let mut history = History::new();
+
+        let temp_file = "/tmp/test_history_output.txt";
+
+        run(&["-w", temp_file], &mut history)?;
+
+        let written_history = fs::read_to_string(temp_file)?;
+
+        assert_eq!(written_history, "");
         fs::remove_file(temp_file).ok();
         Ok(())
     }

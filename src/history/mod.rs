@@ -1,4 +1,4 @@
-use std::{ fs::File, io::{BufRead, BufReader}, path::PathBuf };
+use std::{ fs::File, io::{BufRead, BufReader, BufWriter, Write}, path::PathBuf };
 use anyhow::Error;
 
 pub(crate) struct History {
@@ -17,6 +17,16 @@ impl History {
             if !line.is_empty() {
                 self.append(&line);
             }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn write_to_file(&mut self, path: &PathBuf) -> Result<(), Error> {
+        let file = File::create(path)?;
+        let mut writer = BufWriter::new(file);
+        for command in self.commands.iter() {
+            writer.write(command.as_bytes())?;
+            writer.write(&[b'\n'])?;
         }
         Ok(())
     }
