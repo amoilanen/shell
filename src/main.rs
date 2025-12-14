@@ -41,7 +41,7 @@ fn main() -> Result<(), anyhow::Error> {
     );
 
     loop {
-        print!("\r$ ");
+        print!("$ ");
         io::stdout().flush()?;
         let input = read_line_with_completion(&autocomplete, &history)?;
         let parsed_command = ParsedCommand::parse_command(&input)?;
