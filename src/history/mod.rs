@@ -1,13 +1,15 @@
 use std::{ fs::File, io::{BufRead, BufReader, BufWriter, Write}, path::PathBuf };
+use std::fs::OpenOptions;
 use anyhow::Error;
 
 pub(crate) struct History {
-    commands: Vec<String>
+    commands: Vec<String>,
+    next_index_to_write: usize
 }
 
 impl History {
     pub(crate) fn new() -> Self {
-        History { commands: Vec::new() }
+        History { commands: Vec::new(), next_index_to_write: 0 }
     }
 
     pub(crate) fn read_from_file(&mut self, path: &PathBuf) -> Result<(), Error> {
@@ -21,13 +23,36 @@ impl History {
         Ok(())
     }
 
+    pub(crate) fn append_to_file(&mut self, path: &PathBuf) -> Result<(), Error> {
+        let file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(path)?;
+        let mut writer = BufWriter::new(file);
+        for command in self.commands.iter().skip(self.next_index_to_write) {
+            writer.write(command.as_bytes())?;
+            writer.write(&[b'\n'])?;
+        }
+        self.next_index_to_write = if self.commands.len() > 0 {
+            self.commands.len()
+        } else {
+            0
+        };
+        Ok(())
+    }
+
     pub(crate) fn write_to_file(&mut self, path: &PathBuf) -> Result<(), Error> {
-        let file = File::create(path)?;
+        let file =  OpenOptions::new().write(true).create(true).truncate(true).open(path)?;
         let mut writer = BufWriter::new(file);
         for command in self.commands.iter() {
             writer.write(command.as_bytes())?;
             writer.write(&[b'\n'])?;
         }
+        self.next_index_to_write = if self.commands.len() > 0 {
+            self.commands.len()
+        } else {
+            0
+        };
         Ok(())
     }
 

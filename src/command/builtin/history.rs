@@ -22,6 +22,12 @@ pub(crate) fn run(args: &[&str], history: &mut History) -> Result<(), anyhow::Er
         } else {
             Err(anyhow!("Expected file option, found nothing, args: {:?}", args))
         }
+    } else if let Some(w_option_position) = args.iter().position(|&arg| arg == "-a") {
+        if let Some(history_file_path) = args.get(w_option_position + 1) {
+            history.append_to_file(&history_file_path.into())
+        } else {
+            Err(anyhow!("Expected file option, found nothing, args: {:?}", args))
+        }
     } else {
         let output = generate_output(args, history)?;
         print!("{}", String::from_utf8_lossy(&output));
@@ -35,6 +41,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_generate_output_no_args() -> Result<(), anyhow::Error> {
@@ -74,57 +81,49 @@ mod tests {
     }
 
     #[test]
-    fn test_run_loads_from_file() -> Result<(), anyhow::Error> {
+    fn test_read_history_from_file() -> Result<(), anyhow::Error> {
         let mut history = History::new();
-
-        let temp_file = "/tmp/test_history_run.txt";
-        let mut file = fs::File::create(temp_file)?;
+        let mut file = NamedTempFile::new()?;
         writeln!(file, "echo first")?;
         writeln!(file, "echo second")?;
         writeln!(file, "pwd")?;
-        drop(file);
 
-        run(&["-r", temp_file], &mut history)?;
+        run(&["-r", file.path().to_string_lossy().as_ref()], &mut history)?;
 
         assert_eq!(history.len(), 3);
         let output = generate_output(&[], &history)?;
         let output_str = String::from_utf8(output)?;
         assert_eq!(output_str, "1  echo first\n2  echo second\n3  pwd\n");
 
-        fs::remove_file(temp_file).ok();
         Ok(())
     }
 
     #[test]
     fn test_write_history_to_file() -> Result<(), anyhow::Error> {
         let mut history = History::new();
-
-        let temp_file = "/tmp/test_history_output.txt";
+        let file = NamedTempFile::new()?;
         history.append("ls");
         history.append("cat README.md");
         history.append("pwd");
 
-        run(&["-w", temp_file], &mut history)?;
+        run(&["-w", file.path().to_string_lossy().as_ref()], &mut history)?;
 
-        let written_history = fs::read_to_string(temp_file)?;
+        let written_history = fs::read_to_string(file)?;
 
         assert_eq!(written_history, "ls\ncat README.md\npwd\n");
-        fs::remove_file(temp_file).ok();
         Ok(())
     }
 
     #[test]
     fn test_write_empty_history_to_file() -> Result<(), anyhow::Error> {
         let mut history = History::new();
+        let file = NamedTempFile::new()?;
 
-        let temp_file = "/tmp/test_history_output.txt";
+        run(&["-w", file.path().to_string_lossy().as_ref()], &mut history)?;
 
-        run(&["-w", temp_file], &mut history)?;
-
-        let written_history = fs::read_to_string(temp_file)?;
+        let written_history = fs::read_to_string(file)?;
 
         assert_eq!(written_history, "");
-        fs::remove_file(temp_file).ok();
         Ok(())
     }
 
@@ -133,9 +132,107 @@ mod tests {
         let mut history = History::new();
         history.append("echo hello");
 
-        run(&["-r"], &mut history)?;
+       let err = run(&["-r"], &mut history).unwrap_err();
 
         assert_eq!(history.len(), 1);
+        assert!(format!("{}", err).contains("Expected file option"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_append_history_to_file() -> Result<(), anyhow::Error> {
+        let mut history = History::new();
+        let file = NamedTempFile::new()?;
+        history.append("ls");
+        history.append("cat README.md");
+        history.append("pwd");
+
+        run(&["-a", file.path().to_string_lossy().as_ref()], &mut history)?;
+
+        let written_history = fs::read_to_string(file)?;
+
+        assert_eq!(written_history, "ls\ncat README.md\npwd\n");
+        Ok(())
+    }
+
+    #[test]
+    fn test_multiple_calls_to_append_history() -> Result<(), anyhow::Error> {
+        let mut history = History::new();
+        let file = NamedTempFile::new()?;
+        history.append("ls");
+        history.append("cat README.md");
+        history.append("pwd");
+
+        for _ in 1..5 {
+            run(&["-a", file.path().to_string_lossy().as_ref()], &mut history)?;
+        }
+
+        let written_history = fs::read_to_string(file)?;
+
+        assert_eq!(written_history, "ls\ncat README.md\npwd\n");
+        Ok(())
+    }
+
+    #[test]
+    fn test_append_empty_history_to_file() -> Result<(), anyhow::Error> {
+        let mut history = History::new();
+        let file = NamedTempFile::new()?;
+
+        run(&["-a", file.path().to_string_lossy().as_ref()], &mut history)?;
+
+        let written_history = fs::read_to_string(file)?;
+
+        assert_eq!(written_history, "");
+        Ok(())
+    }
+
+    #[test]
+    fn test_append_empty_history_to_file_after_written_to_file() -> Result<(), anyhow::Error> {
+        let mut history = History::new();
+        let file = NamedTempFile::new()?;
+        let file_path = file.path().to_string_lossy();
+        history.append("ls");
+        history.append("cat README.md");
+        history.append("pwd");
+
+        run(&["-w", file_path.as_ref()], &mut history)?;
+
+        let mut written_history = fs::read_to_string(&file)?;
+        assert_eq!(written_history, "ls\ncat README.md\npwd\n");
+
+        history.append("echo abc");
+        history.append("echo def");
+
+        run(&["-a", file_path.as_ref()], &mut history)?;
+
+        written_history = fs::read_to_string(&file)?;
+        assert_eq!(written_history, "ls\ncat README.md\npwd\necho abc\necho def\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_append_empty_history_to_file_after_appended_to_file() -> Result<(), anyhow::Error> {
+        let mut history = History::new();
+        let file = NamedTempFile::new()?;
+        let file_path = file.path().to_string_lossy();
+        history.append("ls");
+        history.append("cat README.md");
+        history.append("pwd");
+
+        run(&["-a", file_path.as_ref()], &mut history)?;
+
+        let mut written_history = fs::read_to_string(&file)?;
+        assert_eq!(written_history, "ls\ncat README.md\npwd\n");
+
+        history.append("echo abc");
+        history.append("echo def");
+
+        run(&["-a", file_path.as_ref()], &mut history)?;
+
+        written_history = fs::read_to_string(&file)?;
+        assert_eq!(written_history, "ls\ncat README.md\npwd\necho abc\necho def\n");
+
         Ok(())
     }
 }
