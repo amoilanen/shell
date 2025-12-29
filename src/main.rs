@@ -8,6 +8,7 @@ use crate::input::autocompletion::AutoCompletion;
 use crate::input::read_line_with_completion;
 use crate::history::History;
 
+mod args;
 mod path;
 mod command;
 mod input;

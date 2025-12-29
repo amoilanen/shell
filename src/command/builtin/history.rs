@@ -1,33 +1,24 @@
 use std::io::{self, Write};
+use crate::args::read_option;
 use crate::history::History;
-use anyhow::anyhow;
 
 pub(crate) fn generate_output(args: &[&str], history: &History) -> Result<Vec<u8>, anyhow::Error> {
     let limit = args.get(0)
         .map(|s| s.trim().parse::<usize>())
-        .transpose()?;
-    Ok(history.show(limit).into_bytes())
+        .transpose();
+    match limit {
+        Ok(limit) => Ok(history.show(limit).into_bytes()),
+        Err(_) => Ok(Vec::new())
+    }
 }
 
 pub(crate) fn run(args: &[&str], history: &mut History) -> Result<(), anyhow::Error> {
-    if let Some(r_option_position) = args.iter().position(|&arg| arg == "-r") {
-        if let Some(history_file_path) = args.get(r_option_position + 1) {
-            history.read_from_file(&history_file_path.into())
-        } else {
-            Err(anyhow!("Expected file option, found nothing, args: {:?}", args))
-        }
-    } else if let Some(w_option_position) = args.iter().position(|&arg| arg == "-w") {
-        if let Some(history_file_path) = args.get(w_option_position + 1) {
-            history.write_to_file(&history_file_path.into())
-        } else {
-            Err(anyhow!("Expected file option, found nothing, args: {:?}", args))
-        }
-    } else if let Some(w_option_position) = args.iter().position(|&arg| arg == "-a") {
-        if let Some(history_file_path) = args.get(w_option_position + 1) {
-            history.append_to_file(&history_file_path.into())
-        } else {
-            Err(anyhow!("Expected file option, found nothing, args: {:?}", args))
-        }
+    if let Some(history_file_path) = read_option("r", args) {
+        history.read_from_file(&history_file_path.into())
+    } else if let Some(history_file_path) = read_option("w", args) {
+        history.write_to_file(&history_file_path.into())
+    } else if let Some(history_file_path) = read_option("a", args) {
+        history.append_to_file(&history_file_path.into())
     } else {
         let output = generate_output(args, history)?;
         print!("{}", String::from_utf8_lossy(&output));
@@ -72,12 +63,13 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_output_invalid_limit() {
+    fn test_generate_output_invalid_limit() -> Result<(), anyhow::Error> {
         let mut history = History::new();
         history.append("echo hello");
 
-        let result = generate_output(&["not_a_number"], &history);
-        assert!(result.is_err());
+        let output = generate_output(&["not_a_number"], &history)?;
+        assert!(output.is_empty());
+        Ok(())
     }
 
     #[test]
@@ -132,10 +124,9 @@ mod tests {
         let mut history = History::new();
         history.append("echo hello");
 
-       let err = run(&["-r"], &mut history).unwrap_err();
+        run(&["-r"], &mut history)?;
 
         assert_eq!(history.len(), 1);
-        assert!(format!("{}", err).contains("Expected file option"));
         Ok(())
     }
 
