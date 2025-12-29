@@ -1,6 +1,8 @@
 use std::io::{self, Write};
 use std::env;
 use std::panic;
+use std::path::PathBuf;
+use std::str::FromStr;
 use crate::command::{ParsedCommand, builtin};
 use crate::input::autocompletion::AutoCompletion;
 use crate::input::read_line_with_completion;
@@ -32,8 +34,11 @@ where
 
 
 fn main() -> Result<(), anyhow::Error> {
-    let path = path::Path::parse(&env::var("PATH")?)?;
+    let path = path::Path::parse(&env::var("PATH").unwrap_or("".to_owned()))?;
     let mut history = History::new();
+    if let Some(history_file) = &env::var("HISTFILE").ok() {
+        history.read_from_file(&PathBuf::from_str(history_file)?)?;
+    }
     let automcomplete_path = path.clone();
     let autocomplete = AutoCompletion::new_with_dynamic_completion(
         vec!["echo", "cd", "pwd", "exit", "type"],
